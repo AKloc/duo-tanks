@@ -42,11 +42,18 @@ struct BattlefieldView: View {
                 let _ = ambience.update(time: time, wind: wind, blasts: blasts, weather: weather, onStrike: game.thunder)
                 Canvas { context, size in
                     drawSky(look, weather: weather, in: &context, size: size, mapper: mapper, time: time)
+                    // Buried tanks go behind the ground so the dirt covers them.
+                    for tank in tanks where tank.isBuried(in: terrain) {
+                        drawTank(tank, terrain: terrain, isCurrent: tank.id == currentID, in: &context, mapper: mapper, time: time)
+                    }
                     drawTerrain(terrain, look: look, soil: soil, in: &context, mapper: mapper, time: time, wind: wind)
+                    for tank in tanks where tank.isBuried(in: terrain) {
+                        drawBuriedMarker(tank, terrain: terrain, isCurrent: tank.id == currentID, in: &context, mapper: mapper)
+                    }
                     drawTracers(tracers, tanks: tanks, in: &context, mapper: mapper)
                     drawFlames(flames, terrain: terrain, in: &context, mapper: mapper, time: time)
                     drawBeams(game.beams, in: &context, mapper: mapper)
-                    for tank in tanks {
+                    for tank in tanks where !tank.isBuried(in: terrain) {
                         drawTank(tank, terrain: terrain, isCurrent: tank.id == currentID, in: &context, mapper: mapper, time: time)
                     }
                     for turret in turrets {
@@ -577,6 +584,25 @@ struct BattlefieldView: View {
             marker.closeSubpath()
             context.fill(marker, with: .color(.yellow))
         }
+    }
+
+    /// Shows where a buried tank is: a dashed outline through the dirt, its health and a tag at the surface.
+    private func drawBuriedMarker(_ tank: Tank, terrain: Terrain, isCurrent: Bool, in context: inout GraphicsContext, mapper: WorldMapper) {
+        let s = mapper.scale
+        let base = mapper.screen(tank.position)
+        let outline = CGRect(x: base.x - 15 * s, y: base.y - 16 * s, width: 30 * s, height: 16 * s)
+        context.stroke(Path(roundedRect: outline, cornerRadius: 5 * s), with: .color(tank.color.opacity(0.8)),
+                       style: StrokeStyle(lineWidth: 1.2 * s, dash: [3 * s, 2 * s]))
+        guard tank.isAlive else { return }
+        let surface = mapper.screen(Vec(tank.position.x, terrain.height(at: tank.position.x)))
+        let bar = CGRect(x: surface.x - 14 * s, y: surface.y - 12 * s, width: 28 * s, height: 3.5 * s)
+        context.fill(Path(roundedRect: bar, cornerRadius: 1.5 * s), with: .color(.black.opacity(0.55)))
+        context.fill(Path(roundedRect: CGRect(x: bar.minX, y: bar.minY, width: bar.width * tank.health / 100, height: bar.height), cornerRadius: 1.5 * s),
+                     with: .color(tank.health > 60 ? .green : tank.health > 30 ? .yellow : .red))
+        let label = Text("BURIED")
+            .font(.system(size: max(9, 9 * s), weight: .heavy, design: .rounded))
+            .foregroundStyle(isCurrent ? Color.yellow : tank.color)
+        context.draw(label, at: CGPoint(x: surface.x, y: bar.minY - 7 * s))
     }
 
     private func drawFlyingTurret(_ turret: FlyingTurret, in context: inout GraphicsContext, mapper: WorldMapper) {

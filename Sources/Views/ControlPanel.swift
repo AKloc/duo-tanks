@@ -85,6 +85,10 @@ struct ControlPanel: View {
                             .font(.caption.bold())
                             .foregroundStyle(tank.color)
                             .transaction { $0.animation = nil }
+                    } else if tank.isBuried(in: game.terrain), game.chargePower == nil {
+                        Label("Buried! Fire a Riot Charge upward to dig out", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.bold())
+                            .foregroundStyle(.orange)
                     } else {
                         Text(game.chargePower == nil ? "last power · hold FIRE to charge" : "power")
                             .font(.caption)

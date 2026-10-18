@@ -65,6 +65,18 @@ enum ComputerPlayer {
             try? await Task.sleep(for: .seconds(0.4))
         }
 
+        if game.current.isBuried(in: game.terrain), game.current.ammoCount(.riotCharge) != 0 {
+            game.setComputerStatus("Digging out…")
+            game.select(.riotCharge)
+            game.setAngle(90)
+            try? await Task.sleep(for: .seconds(0.4))
+            game.beginCharge()
+            try? await Task.sleep(for: .seconds(0.3))
+            game.setComputerStatus(nil)
+            game.releaseCharge(cappedAt: 15)
+            return
+        }
+
         let weapon = chooseWeapon(for: game.current, against: target, game: game, difficulty: difficulty)
         game.select(weapon)
 
@@ -115,8 +127,8 @@ enum ComputerPlayer {
     static func shop(in game: Game, playerIndex: Int, difficulty: Difficulty) {
         let wishlist: [ShopItem] = switch difficulty {
         case .easy: [.weapon(.missile), .weapon(.dirtClod), .parachute, .weapon(.babyNuke), .weapon(.funkyBomb), .weapon(.roller)].shuffled()
-        case .normal: [.parachute, .weapon(.missile), .shield, .weapon(.mirv), .weapon(.babyNuke), .weapon(.roller), .repairKit, .weapon(.nuke)]
-        case .hard: [.shield, .parachute, .weapon(.mirv), .weapon(.missile), .repairKit, .weapon(.plasmaBlast), .weapon(.babyNuke), .weapon(.nuke), .weapon(.deathsHead), .weapon(.heavyRoller)]
+        case .normal: [.parachute, .weapon(.missile), .weapon(.riotCharge), .shield, .weapon(.mirv), .weapon(.babyNuke), .weapon(.roller), .repairKit, .weapon(.nuke)]
+        case .hard: [.shield, .parachute, .weapon(.riotCharge), .weapon(.mirv), .weapon(.missile), .repairKit, .weapon(.plasmaBlast), .weapon(.babyNuke), .weapon(.nuke), .weapon(.deathsHead), .weapon(.heavyRoller)]
         }
         var purchases = 0
         var bought = true
@@ -126,6 +138,7 @@ enum ComputerPlayer {
                 let owned = game.players[playerIndex].inventory.count(of: item)
                 if item == .shield || item == .repairKit, owned >= 2 { continue }
                 if item == .parachute, owned >= 3 { continue }
+                if item == .weapon(.riotCharge), owned >= 2 { continue }
                 game.buy(item)
                 purchases += 1
                 bought = true

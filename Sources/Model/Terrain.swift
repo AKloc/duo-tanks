@@ -77,11 +77,31 @@ struct Terrain {
         }
     }
 
-    /// Drops a circle's worth of dirt onto each column it covers.
+    /// Drops a circle's worth of dirt onto each column it covers, then lets it slump into a mound.
     mutating func addDirt(center: Vec, radius: Double) {
         for span in spans(center: center, radius: radius) {
             heights[span.column] = min(heights[span.column] + span.top - span.bottom, maxHeight * 0.95)
             grass[span.column] = 0
+        }
+        slump(around: center.x, reach: Int(radius * 3))
+    }
+
+    /// Loose dirt steeper than `maxSlope` (rise per column) slides downhill until it's stable. Mass is conserved.
+    mutating func slump(around x: Double, reach: Int, maxSlope: Double = 1.1) {
+        let lo = max(0, Int(x) - reach), hi = min(width - 1, Int(x) + reach)
+        guard lo < hi else { return }
+        for _ in 0..<4_000 {
+            var moved = false
+            for i in lo..<hi {
+                let difference = heights[i] - heights[i + 1]
+                guard abs(difference) > maxSlope + 0.002 else { continue }
+                let shift = (abs(difference) - maxSlope) / 2 * (difference > 0 ? 1 : -1)
+                heights[i] -= shift
+                heights[i + 1] += shift
+                if shift > 0 { grass[i + 1] = 0 } else { grass[i] = 0 }
+                moved = true
+            }
+            if !moved { break }
         }
     }
 

@@ -58,7 +58,7 @@ You earn **$40 per point of damage** to opponents, **$2,500 per kill** (includin
 | Repair Kit | $4,000 | Restores 35 health on your turn |
 | Fuel | $1,500 for 60 | Drive your tank on your turn; everyone starts with 30 |
 
-Tanks that lose the ground under them fall and take damage. Blasts rock nearby tanks and bounce them on their tracks, tanks sit tilted on slopes, and destroyed tanks cook off and throw their turrets.
+Tanks that lose the ground under them fall and take damage. Dirt piled on top buries a tank: its shots blow up in the dirt right on top of it and it can't drive, so fire a Riot Charge upward (or use a Laser or Sandhog) to dig out. Loose dirt slumps into natural mounds. Blasts rock nearby tanks and bounce them on their tracks, tanks sit tilted on slopes, and destroyed tanks cook off and throw their turrets.
 
 ## Driving
 

@@ -185,6 +185,42 @@ struct GameplayTests {
         #expect(abs(game.tanks[0].health - (100 - (80 - Game.safeFallHeight) * Game.fallDamagePerUnit)) < 1)
     }
 
+    @Test func aDirtClodOnTopBuriesTheTank() throws {
+        let game = makeGame()
+        let aim = try aimAtOpponent(in: game)
+        game.fireForTesting(weapon: .dirtClod, angle: aim.angle, power: aim.power)
+        game.runUntilSettled()
+        let target = game.tanks[1]
+        #expect(target.isBuried(in: game.terrain), "depth \(target.buriedDepth(in: game.terrain))")
+        #expect(target.position.y == 100, "the tank stays where it was instead of rising onto the dirt")
+        #expect(target.health == 100)
+    }
+
+    @Test func aBuriedTankCannotDrive() {
+        let game = makeGame()
+        var terrain = Terrain(flatHeight: 100)
+        terrain.addDirt(center: Vec(300, 100), radius: 30)
+        game.installScenario(terrain: Terrain(flatHeight: 100), tankXs: [300, 520])
+        game.bury(tank: 0, under: terrain)
+        game.setFuel(50, ofTank: 0)
+        game.startDriving(1)
+        for _ in 0..<60 { game.stepForTesting() }
+        #expect(game.tanks[0].position.x == 300)
+    }
+
+    @Test func aRiotChargeFiredUpwardDigsATankOut() {
+        let game = makeGame()
+        var terrain = Terrain(flatHeight: 100)
+        terrain.addDirt(center: Vec(300, 100), radius: 30)
+        game.installScenario(terrain: Terrain(flatHeight: 100), tankXs: [300, 520])
+        game.bury(tank: 0, under: terrain)
+        #expect(game.tanks[0].isBuried(in: game.terrain))
+        game.fireForTesting(weapon: .riotCharge, angle: 90, power: 10)
+        game.runUntilSettled()
+        #expect(game.tanks[0].buriedDepth(in: game.terrain) < 0.5)
+        #expect(game.tanks[0].health == 100)
+    }
+
     @Test func aShieldSoaksUpTheBlast() throws {
         let game = makeGame()
         game.setCurrentTank(1)

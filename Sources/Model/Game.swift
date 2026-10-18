@@ -19,6 +19,8 @@ struct Tank: Identifiable {
     static let hitRadius = 12.0
     static let barrelLength = 16.0
     static let maxShield = 60.0
+    /// Dirt deeper than this over a tank counts as burying it.
+    static let buriedThreshold = 3.0
 
     let id: Int
     let name: String
@@ -43,6 +45,15 @@ struct Tank: Identifiable {
     var hasTurret = true
     /// How far the treads have turned, for animating them.
     var treadTravel = 0.0
+
+    /// How deep under the dirt this tank sits; 0 when it's on the surface.
+    func buriedDepth(in terrain: Terrain) -> Double {
+        max(0, terrain.height(at: position.x) - position.y)
+    }
+
+    func isBuried(in terrain: Terrain) -> Bool {
+        buriedDepth(in: terrain) > Tank.buriedThreshold
+    }
 
     var isRocking: Bool { abs(tilt) > 0.002 || abs(tiltVelocity) > 0.01 || hop > 0.01 || hopVelocity > 0.01 }
 
@@ -492,6 +503,12 @@ final class Game {
         guard step > 0 else { return stopDriving() }
         let nextX = min(max(tank.position.x + direction * step, 12), Game.worldSize.x - 12)
         let ahead = terrain.height(at: nextX)
+        if tank.isBuried(in: terrain) {
+            stopDriving()
+            floatingTexts.append(FloatingText(position: tank.turretCenter + Vec(0, 26), text: "Buried", color: .gray))
+            buzz(0.3)
+            return
+        }
         if ahead - tank.position.y > step * 1.3 + 0.2 {
             stopDriving()
             floatingTexts.append(FloatingText(position: tank.turretCenter + Vec(0, 26), text: "Too steep", color: .gray))
@@ -565,7 +582,8 @@ final class Game {
         rng = SeededRandom(seed: seed)
 
         if case .riot = weapon.behavior {
-            let center = tank.muzzle + direction * 14
+            // Centered close to the barrel so a buried tank can blast its way out.
+            let center = tank.muzzle + direction * 6
             terrain.carve(center: center, radius: weapon.blastRadius, leavesScorch: false)
             particles += ParticleFactory.dirt(at: center, radius: weapon.blastRadius)
             sound.dirt(atX: center.x)
@@ -1047,7 +1065,8 @@ final class Game {
                 tanks[i].position.y -= drop
                 tanks[i].fallDistance += drop
             } else {
-                tanks[i].position.y = ground
+                // Dirt piled on top buries a tank rather than lifting it.
+                if tanks[i].position.y > ground - 0.5 { tanks[i].position.y = ground }
                 if tanks[i].fallDistance > 0 {
                     if !tanks[i].isParachuting {
                         damage(tankAt: i, by: max(0, tanks[i].fallDistance - Game.safeFallHeight) * Game.fallDamagePerUnit, attackerID: tanks[i].lastAttackerID, bypassesShield: true)
@@ -1255,6 +1274,11 @@ extension Game {
         explosions = []
         lastImpact = nil
         phase = .aiming
+    }
+
+    /// Swaps in new ground without moving the tanks, burying any that end up under it.
+    func bury(tank index: Int, under terrain: Terrain) {
+        self.terrain = terrain
     }
 
     func setFuel(_ fuel: Double, ofTank index: Int) {

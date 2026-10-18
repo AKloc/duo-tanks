@@ -21,10 +21,15 @@ struct TerrainTests {
         #expect(abs(terrain.height(at: 500) - 80) < 0.01)
     }
 
-    @Test func dirtPilesUpAsAMound() {
+    @Test func dirtSlumpsIntoAMoundWithoutLosingAny() {
         var terrain = Terrain(flatHeight: 100)
+        let before = terrain.heights.reduce(0, +)
         terrain.addDirt(center: Vec(500, 100), radius: 20)
-        #expect(abs(terrain.height(at: 500) - 140) < 0.01)
+        #expect(abs(terrain.heights.reduce(0, +) - before - .pi * 20 * 20) < 30, "about a circle's worth of dirt")
+        #expect(terrain.height(at: 500) > 115)
+        #expect(terrain.height(at: 500) < 140, "it slumped instead of standing as a pillar")
+        let steepest = (400..<600).map { abs(terrain.heights[$0] - terrain.heights[$0 + 1]) }.max() ?? 0
+        #expect(steepest <= 1.11)
         #expect(terrain.grass[500] == 0)
     }
 
