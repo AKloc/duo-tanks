@@ -123,6 +123,8 @@ final class Game {
     nonisolated static let parachuteSpeed = 35.0
     /// Power gained per second while the fire button is held.
     nonisolated static let chargeRate = 50.0
+    /// The simulation always advances in steps this long, so a shot plays out the same way every time.
+    nonisolated static let stepDuration = 1.0 / 240
 
     private(set) var settings: MatchSettings
     private(set) var theme = WorldTheme.hills
@@ -164,6 +166,11 @@ final class Game {
     @ObservationIgnored private var burnDamage: [Int: Double] = [:]
     @ObservationIgnored private var burnTextTimer = 0.0
     @ObservationIgnored private var computerTask: Task<Void, Never>?
+    @ObservationIgnored private var accumulator = 0.0
+    /// Drives gameplay randomness (bomblet scatter, napalm spread); reseeded for every shot.
+    @ObservationIgnored private var rng = SeededRandom(seed: 1)
+    /// Where the most recent blast went off.
+    @ObservationIgnored private(set) var lastImpact: Vec?
 
     var current: Tank { tanks[currentIndex] }
 
@@ -392,6 +399,8 @@ final class Game {
         buzz(0.5)
         shake = max(shake, 0.15)
         phase = .firing
+        accumulator = 0
+        rng = SeededRandom(seed: UInt64.random(in: 1...UInt64.max))
 
         if case .riot = weapon.behavior {
             let center = tank.muzzle + direction * 14
@@ -437,19 +446,19 @@ final class Game {
         }
 
         if phase == .firing {
-            var remaining = dt
-            while remaining > 0 {
-                let step = min(remaining, 1.0 / 240)
-                simulate(step)
-                remaining -= step
+            accumulator += dt
+            while accumulator >= Game.stepDuration {
+                simulate(Game.stepDuration)
+                updateFlames(Game.stepDuration)
+                accumulator -= Game.stepDuration
             }
-            updateFlames(dt)
             sound.updateFlights(projectiles.filter(\.isFlying))
         }
 
         updateEffects(dt)
 
-        let isSettling = tanks.contains { $0.position.y > terrain.height(at: $0.position.x) + 0.5 }
+        // A falling tank counts until its landing (and any fall damage) has been processed.
+        let isSettling = tanks.contains { $0.fallDistance > 0 || $0.position.y > terrain.height(at: $0.position.x) + 0.5 }
         if phase == .firing, projectiles.isEmpty, flames.isEmpty, explosions.isEmpty, !isSettling {
             endTurn()
         }
@@ -571,8 +580,8 @@ final class Game {
         case let .scatterOnImpact(count, child):
             explode(weapon, at: center, ownerID: p.ownerID, directHitID: directHitID)
             return (0..<count).map { _ in
-                let angle = Double.random(in: 0.25...(.pi - 0.25))
-                let speed = Double.random(in: 120...260)
+                let angle = Double.random(in: 0.25...(.pi - 0.25), using: &rng)
+                let speed = Double.random(in: 120...260, using: &rng)
                 return Projectile(position: center + Vec(0, 3), velocity: Vec(cos(angle), sin(angle)) * speed, weapon: child, ownerID: p.ownerID, age: 1)
             }
 
@@ -605,7 +614,7 @@ final class Game {
 
         case .napalm:
             flames += (0..<9).map { i in
-                Flame(x: center.x + Double(i - 4) * 4.5 + Double.random(in: -1.5...1.5), life: Double.random(in: 3.5...4.5), ownerID: p.ownerID)
+                Flame(x: center.x + Double(i - 4) * 4.5 + Double.random(in: -1.5...1.5, using: &rng), life: Double.random(in: 3.5...4.5, using: &rng), ownerID: p.ownerID)
             }
             explosions.append(Explosion(center: center, radius: 18, isDirt: false))
             particles += ParticleFactory.explosion(at: center, radius: 14)
@@ -631,6 +640,7 @@ final class Game {
 
     private func explode(_ weapon: Weapon, at center: Vec, ownerID: Int, directHitID: Int?) {
         let radius = weapon.blastRadius
+        lastImpact = center
         terrain.carve(center: center, radius: radius)
         blastEffects(at: center, radius: radius)
         undermine(around: center.x, radius: radius * 1.5, ownerID: ownerID)
@@ -875,3 +885,69 @@ final class Game {
         maxWind > 0 ? Double.random(in: -maxWind...maxWind).rounded() : 0
     }
 }
+
+#if DEBUG
+/// Hooks for unit tests: set up exact situations and run the simulation to completion without the real-time loop.
+extension Game {
+    func installScenario(terrain: Terrain, tankXs: [Double], wind: Double = 0, currentIndex: Int = 0) {
+        loop?.cancel()
+        loop = nil
+        computerTask?.cancel()
+        computerTask = nil
+        self.terrain = terrain
+        for (i, x) in tankXs.enumerated() where tanks.indices.contains(i) {
+            tanks[i].position = Vec(x, terrain.height(at: x))
+            tanks[i].health = 100
+            tanks[i].shield = 0
+            tanks[i].fallDistance = 0
+        }
+        self.wind = wind
+        self.currentIndex = currentIndex
+        projectiles = []
+        flames = []
+        explosions = []
+        lastImpact = nil
+        phase = .aiming
+    }
+
+    func setCurrentTank(_ index: Int) {
+        currentIndex = index
+    }
+
+    func setHealth(_ health: Double, ofTank index: Int) {
+        tanks[index].health = health
+    }
+
+    func give(_ item: ShopItem, quantity: Int, toTank index: Int) {
+        tanks[index].inventory.add(item, quantity: quantity)
+    }
+
+    func lift(tank index: Int, by height: Double) {
+        tanks[index].position.y += height
+        phase = .firing
+    }
+
+    func fireForTesting(weapon: Weapon, angle: Double, power: Double) {
+        if weapon != .babyMissile, current.ammoCount(weapon) == 0 { give(.weapon(weapon), quantity: 1, toTank: currentIndex) }
+        select(weapon)
+        setAngle(angle)
+        tanks[currentIndex].power = power
+        fire()
+        loop?.cancel()
+        loop = nil
+    }
+
+    /// Steps the game in 60 Hz frames until the shot and everything it set off has settled.
+    func runUntilSettled(maxSeconds: Double = 60) {
+        loop?.cancel()
+        loop = nil
+        var elapsed = 0.0
+        while phase == .firing, elapsed < maxSeconds {
+            _ = advance(by: 1.0 / 60)
+            elapsed += 1.0 / 60
+        }
+        loop?.cancel()
+        loop = nil
+    }
+}
+#endif

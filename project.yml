@@ -26,3 +26,15 @@ targets:
       base:
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: YES
+    scheme:
+      testTargets:
+        - DuoTanksTests
+  DuoTanksTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: DuoTanks
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES

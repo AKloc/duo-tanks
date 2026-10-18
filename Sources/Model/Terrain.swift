@@ -37,6 +37,17 @@ struct Terrain {
         }
     }
 
+    /// Level ground, mostly for tests.
+    init(flatHeight: Double, width: Int = Int(Game.worldSize.x), maxHeight: Double = Game.worldSize.y) {
+        self.init(heights: Array(repeating: flatHeight, count: width), maxHeight: maxHeight)
+    }
+
+    init(heights: [Double], maxHeight: Double = Game.worldSize.y) {
+        self.heights = heights
+        self.maxHeight = maxHeight
+        grass = Array(repeating: 1, count: heights.count)
+    }
+
     func height(at x: Double) -> Double {
         let i = Int(x.rounded())
         guard heights.indices.contains(i) else { return 0 }

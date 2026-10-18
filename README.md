@@ -79,6 +79,15 @@ open DuoTanks.xcodeproj
 
 Pick the **iPhone Duo** simulator or your device and press Run. To install on a real phone, set your team under Signing & Capabilities.
 
+## Tests
+
+The physics, terrain, economy and the computer's aiming are covered by Swift Testing suites in `Tests/`. Gameplay tests fire real shots through the game's fixed-step simulation on known terrain.
+
+```sh
+xcodegen generate
+xcodebuild test -project DuoTanks.xcodeproj -scheme DuoTanks -destination 'platform=iOS Simulator,name=iPhone Duo'
+```
+
 ## License
 
 MIT
