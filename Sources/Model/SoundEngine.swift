@@ -9,6 +9,7 @@ final class SoundEngine {
     private let engine = AVAudioEngine()
     private let mono = AVAudioFormat(standardFormatWithSampleRate: SoundEngine.sampleRate, channels: 1)!
     private let whistles = WhistleSynth(sampleRate: SoundEngine.sampleRate)
+    private let music = MusicSynth(sampleRate: SoundEngine.sampleRate)
     private var players: [AVAudioPlayerNode] = []
     private var nextPlayer = 0
     private var explosionBuffers: [Int: AVAudioPCMBuffer] = [:]
@@ -42,9 +43,11 @@ final class SoundEngine {
             players.append(player)
         }
         let stereo = AVAudioFormat(standardFormatWithSampleRate: SoundEngine.sampleRate, channels: 2)!
-        let source = SoundEngine.makeSourceNode(format: stereo, synth: whistles)
-        engine.attach(source)
-        try? engine.connectNode(source, to: engine.mainMixerNode, format: stereo)
+        for renderer in [whistles, music] as [any AudioRenderer] {
+            let source = SoundEngine.makeSourceNode(format: stereo, renderer: renderer)
+            engine.attach(source)
+            try? engine.connectNode(source, to: engine.mainMixerNode, format: stereo)
+        }
         try? engine.start()
     }
 
@@ -61,6 +64,10 @@ final class SoundEngine {
 
     func laser(atX x: Double) {
         play(laserBuffer, atX: x, volume: 0.7)
+    }
+
+    func setMusic(tension: Double, enabled: Bool, level: Double = 0.55) {
+        music.update(tension: tension, enabled: enabled, level: level)
     }
 
     func thunder(atX x: Double) {
@@ -127,9 +134,9 @@ final class SoundEngine {
     }
 
     /// Built outside the main actor so the render block isn't main-actor isolated.
-    private nonisolated static func makeSourceNode(format: AVAudioFormat, synth: WhistleSynth) -> AVAudioSourceNode {
+    private nonisolated static func makeSourceNode(format: AVAudioFormat, renderer: any AudioRenderer) -> AVAudioSourceNode {
         AVAudioSourceNode(format: format) { _, _, frameCount, bufferList in
-            synth.render(frameCount: Int(frameCount), buffers: UnsafeMutableAudioBufferListPointer(bufferList))
+            renderer.render(frameCount: Int(frameCount), buffers: UnsafeMutableAudioBufferListPointer(bufferList))
             return noErr
         }
     }
@@ -152,7 +159,7 @@ struct Noise {
 }
 
 /// Mixes the in-flight whistles on the audio render thread.
-final class WhistleSynth: Sendable {
+final class WhistleSynth: AudioRenderer {
     struct Target: Sendable {
         let id: UUID
         let frequency: Double

@@ -12,6 +12,7 @@ struct TitleView: View {
     @AppStorage("roughness") private var roughness = Roughness.rolling
     @AppStorage("volume") private var volume = 0.8
     @AppStorage("haptics") private var hapticsEnabled = true
+    @AppStorage("music") private var musicEnabled = true
     @AppStorage("opponent") private var versusComputer = false
     @AppStorage("difficulty") private var difficulty = Difficulty.normal
 
@@ -62,6 +63,7 @@ struct TitleView: View {
                         }
                         .frame(maxWidth: 300)
                     }
+                    Toggle("Music", isOn: $musicEnabled)
                     Toggle("Haptics", isOn: $hapticsEnabled)
                 }
                 Button(action: start) {
@@ -138,7 +140,7 @@ struct TitleView: View {
     private func start() {
         onStart(MatchSettings(
             rounds: rounds, startingMoney: startingMoney, world: world, weather: weather,
-            wind: wind, roughness: roughness, volume: volume, hapticsEnabled: hapticsEnabled,
+            wind: wind, roughness: roughness, volume: volume, hapticsEnabled: hapticsEnabled, musicEnabled: musicEnabled,
             computerOpponent: versusComputer ? difficulty : nil
         ))
     }

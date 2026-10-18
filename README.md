@@ -72,6 +72,10 @@ The shot that ends a round plays again in slow motion: the camera rides along wi
 
 Choose **Vs computer** on the title screen and pick Easy, Normal or Hard. The computer predicts its shots with the same physics as the game, misjudges the wind and adds aiming error according to difficulty, and tightens its aim over repeated shots the way a person brackets a target. It raises shields, patches itself up, picks weapons to suit the terrain, avoids shots that would hit itself, and does its own shopping between rounds.
 
+## Music
+
+The soundtrack is generated live and follows the fight. It starts as a slow, soft pad and bassline. As health drops, shells fly and the final round arrives, it speeds up and darkens, adding drums, a syncopated bass, an arpeggio and hi-hats. The kill cam gets the most dramatic version. Turn it off on the title screen or from the in-game menu.
+
 ## Worlds and weather
 
 Pick a world on the title screen, or let each round roll a random one:

@@ -59,6 +59,7 @@ struct MatchSettings {
     var roughness = Roughness.rolling
     var volume = 0.8
     var hapticsEnabled = true
+    var musicEnabled = true
     /// `nil` for two people passing the phone.
     var computerOpponent: Difficulty?
 }

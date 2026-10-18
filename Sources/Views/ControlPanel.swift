@@ -5,6 +5,8 @@ struct ControlPanel: View {
     let hinge: HingeState?
     let onQuit: () -> Void
 
+    @AppStorage("music") private var musicEnabled = true
+
     var body: some View {
         Group {
             switch game.phase {
@@ -28,6 +30,7 @@ struct ControlPanel: View {
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.regularMaterial)
+        .onChange(of: musicEnabled) { _, enabled in game.setMusicEnabled(enabled) }
     }
 
     private func controls(for tank: Tank) -> some View {
@@ -54,6 +57,7 @@ struct ControlPanel: View {
                     HealthLabel(health: tank.health, shield: tank.shield)
                     Menu {
                         Text("\(game.theme.name) · gravity \(Int(game.theme.gravityScale * 100))%")
+                        Toggle("Music", systemImage: "music.note", isOn: $musicEnabled)
                         Button("Quit to Title", systemImage: "xmark", role: .destructive, action: onQuit)
                     } label: {
                         Image(systemName: "ellipsis.circle").font(.title3)

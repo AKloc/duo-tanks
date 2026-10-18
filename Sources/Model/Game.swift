@@ -273,6 +273,31 @@ final class Game {
         buzz(0.3)
     }
 
+    func setMusicEnabled(_ enabled: Bool) {
+        settings.musicEnabled = enabled
+        updateMusic()
+    }
+
+    /// Music follows the fight: low health, the final round, charging and shells in flight raise the tension.
+    private func updateMusic() {
+        var tension: Double
+        var level = 0.55
+        switch phase {
+        case .roundOver, .matchOver: tension = 0.1
+        case .shopping: tension = 0.05
+        case .killCam:
+            tension = 0.95
+            level = 0.7
+        case .aiming, .firing:
+            let lowest = tanks.filter(\.isAlive).map(\.health).min() ?? 100
+            tension = 0.15 + 0.45 * (1 - lowest / 100)
+            if round == settings.rounds { tension += 0.15 }
+            if phase == .firing { tension += 0.15 }
+            if chargePower != nil { tension += 0.1 }
+        }
+        sound.setMusic(tension: tension, enabled: settings.musicEnabled, level: level)
+    }
+
     private func buzz(_ intensity: Double) {
         guard settings.hapticsEnabled else { return }
         haptics.impactOccurred(intensity: intensity)
@@ -346,6 +371,7 @@ final class Game {
         wind = randomWind()
         phase = .aiming
         sound.updateFlights([])
+        updateMusic()
         scheduleComputerTurn()
     }
 
@@ -378,11 +404,13 @@ final class Game {
             if players[i].id == winnerID { players[i].wins += 1 }
         }
         phase = .roundOver(winnerID: winnerID)
+        updateMusic()
     }
 
     func continueAfterRound() {
         guard case .roundOver = phase else { return }
         phase = round >= settings.rounds ? .matchOver : .shopping(playerIndex: 0)
+        updateMusic()
         shopForComputers()
     }
 
@@ -701,6 +729,7 @@ final class Game {
         }
 
         updateEffects(dt * timeScale)
+        updateMusic()
 
         // A falling tank counts until its landing (and any fall damage) has been processed.
         let isSettling = tanks.contains { $0.fallDistance > 0 || $0.position.y > terrain.height(at: $0.position.x) + 0.5 }
