@@ -100,15 +100,27 @@ struct TitleView: View {
     }
 
     private var header: some View {
-        VStack(spacing: 4) {
-            Text("DUO TANKS")
-                .font(.system(size: 56, weight: .black, design: .rounded))
-                .foregroundStyle(LinearGradient(colors: [.yellow, .orange, .red], startPoint: .top, endPoint: .bottom))
-                .shadow(color: .orange.opacity(0.6), radius: 16)
+        VStack(spacing: 6) {
+            Text("DUO")
+                .font(.system(size: 15, weight: .semibold).width(.expanded))
+                .tracking(14)
+                .padding(.leading, 14)
+                .foregroundStyle(.orange)
+            Text("TANKS")
+                .font(.system(size: 64, weight: .black).width(.expanded))
+                .tracking(-1)
+                .foregroundStyle(LinearGradient(colors: [Color(white: 0.97), Color(white: 0.72)], startPoint: .top, endPoint: .bottom))
+                .shadow(color: .black.opacity(0.5), radius: 0, y: 3)
+            Capsule()
+                .fill(.orange)
+                .frame(width: 64, height: 3)
+                .padding(.top, 2)
             Text("An artillery duel for iPhone Duo")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .padding(.top, 6)
         }
+        .accessibilityElement(children: .combine)
         .padding(.top, 28)
     }
 
