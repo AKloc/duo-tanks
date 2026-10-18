@@ -40,6 +40,10 @@ struct Player: Identifiable {
     var wins = 0
     var kills = 0
     var inventory = Inventory.starting
+    /// `nil` for a person.
+    var computer: Difficulty?
+
+    var isComputer: Bool { computer != nil }
 }
 
 struct MatchSettings {
@@ -51,6 +55,8 @@ struct MatchSettings {
     var roughness = Roughness.rolling
     var volume = 0.8
     var hapticsEnabled = true
+    /// `nil` for two people passing the phone.
+    var computerOpponent: Difficulty?
 }
 
 /// Money earned this round, broken down for the results screen.

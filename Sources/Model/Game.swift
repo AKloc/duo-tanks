@@ -149,6 +149,8 @@ final class Game {
     /// 0...1, decays after each blast.
     private(set) var shake = 0.0
     private(set) var flash = 0.0
+    /// What the computer is doing on its turn, for the control panel.
+    private(set) var computerStatus: String?
 
     @ObservationIgnored private let sound = SoundEngine()
     @ObservationIgnored private let haptics = UIImpactFeedbackGenerator(style: .heavy)
@@ -161,8 +163,22 @@ final class Game {
     @ObservationIgnored private var pendingWrecks: [Int] = []
     @ObservationIgnored private var burnDamage: [Int: Double] = [:]
     @ObservationIgnored private var burnTextTimer = 0.0
+    @ObservationIgnored private var computerTask: Task<Void, Never>?
 
     var current: Tank { tanks[currentIndex] }
+
+    var isComputerTurn: Bool {
+        players.first { $0.id == current.id }?.isComputer ?? false
+    }
+
+    /// Launch speed for a power setting. Low gravity slows launches a little, so shots float and carry farther but stay on screen.
+    func launchSpeed(forPower power: Double) -> Double {
+        power * Game.speedPerPower * pow(theme.gravityScale, 0.35)
+    }
+
+    func setComputerStatus(_ status: String?) {
+        computerStatus = status
+    }
 
     var standings: [Player] {
         players.sorted { ($0.wins, $0.money) > ($1.wins, $1.money) }
@@ -191,7 +207,8 @@ final class Game {
         sound.volume = settings.volume
         players = [
             Player(id: 0, name: "Red", color: .red, money: settings.startingMoney),
-            Player(id: 1, name: "Blue", color: .blue, money: settings.startingMoney),
+            Player(id: 1, name: settings.computerOpponent == nil ? "Blue" : "CPU", color: .blue, money: settings.startingMoney,
+                   computer: settings.computerOpponent),
         ]
         round = 0
         startRound()
@@ -204,6 +221,9 @@ final class Game {
     private func startRound() {
         loop?.cancel()
         loop = nil
+        computerTask?.cancel()
+        computerTask = nil
+        computerStatus = nil
         round += 1
         theme = settings.world.theme ?? WorldTheme.allCases.randomElement()!
         weather = settings.weather.resolve(for: theme)
@@ -241,6 +261,23 @@ final class Game {
         wind = randomWind()
         phase = .aiming
         sound.updateFlights([])
+        scheduleComputerTurn()
+    }
+
+
+    private func scheduleComputerTurn() {
+        guard phase == .aiming, let difficulty = players.first(where: { $0.id == current.id })?.computer else { return }
+        computerTask = Task { [weak self] in
+            guard let self else { return }
+            await ComputerPlayer.takeTurn(in: self, difficulty: difficulty)
+        }
+    }
+
+    private func shopForComputers() {
+        while case let .shopping(index) = phase, let difficulty = players[index].computer {
+            ComputerPlayer.shop(in: self, playerIndex: index, difficulty: difficulty)
+            finishShopping()
+        }
     }
 
     private func endRound(winnerID: Int?) {
@@ -260,6 +297,7 @@ final class Game {
     func continueAfterRound() {
         guard case .roundOver = phase else { return }
         phase = round >= settings.rounds ? .matchOver : .shopping(playerIndex: 0)
+        shopForComputers()
     }
 
     func buy(_ item: ShopItem) {
@@ -272,6 +310,8 @@ final class Game {
         guard case let .shopping(index) = phase else { return }
         if index + 1 < players.count {
             phase = .shopping(playerIndex: index + 1)
+            if !players[index + 1].isComputer { return }
+            shopForComputers()
         } else {
             startRound()
         }
@@ -287,7 +327,7 @@ final class Game {
     /// Hinge opening sets elevation; the barrel keeps facing the side it already faces.
     /// A light tick every 5° makes the hinge feel like a dial.
     func aimWithHinge(degrees: Double) {
-        guard phase == .aiming else { return }
+        guard phase == .aiming, !isComputerTurn else { return }
         let before = current.angle
         let elevation = min(max(degrees - 80, 0), 90)
         setAngle(before <= 90 ? elevation : 180 - elevation)
@@ -322,13 +362,13 @@ final class Game {
         guard phase == .aiming, chargeStartedAt == nil else { return }
         chargeStartedAt = .now
         chargePower = 0
-        if settings.hapticsEnabled { rumble.start() }
+        if settings.hapticsEnabled, !isComputerTurn { rumble.start() }
         startLoop()
     }
 
-    func releaseCharge() {
+    func releaseCharge(cappedAt cap: Double = 100) {
         guard let start = chargeStartedAt else { return }
-        let power = min((ContinuousClock.now - start).seconds * Game.chargeRate, 100).rounded()
+        let power = min((ContinuousClock.now - start).seconds * Game.chargeRate, cap, 100).rounded()
         chargeStartedAt = nil
         chargePower = nil
         rumble.stop()
@@ -360,9 +400,7 @@ final class Game {
             sound.dirt(atX: center.x)
             shake = max(shake, 0.3)
         } else {
-            // Low gravity also slows launches a little, so shots float and carry farther but stay on screen.
-            let speed = tank.power * Game.speedPerPower * pow(theme.gravityScale, 0.35)
-            var shell = Projectile(position: tank.muzzle, velocity: direction * speed, weapon: weapon, ownerID: tank.id)
+            var shell = Projectile(position: tank.muzzle, velocity: direction * launchSpeed(forPower: tank.power), weapon: weapon, ownerID: tank.id)
             if case let .bounce(times) = weapon.behavior { shell.bouncesLeft = times }
             projectiles = [shell]
             sound.launch(atX: tank.position.x)
@@ -830,6 +868,7 @@ final class Game {
         } while !tanks[currentIndex].isAlive
         wind = randomWind()
         phase = .aiming
+        scheduleComputerTurn()
     }
 
     private func randomWind() -> Double {

@@ -12,6 +12,8 @@ struct TitleView: View {
     @AppStorage("roughness") private var roughness = Roughness.rolling
     @AppStorage("volume") private var volume = 0.8
     @AppStorage("haptics") private var hapticsEnabled = true
+    @AppStorage("opponent") private var versusComputer = false
+    @AppStorage("difficulty") private var difficulty = Difficulty.normal
 
     private static let moneyOptions = [5_000, 15_000, 30_000, 50_000]
 
@@ -20,6 +22,16 @@ struct TitleView: View {
             VStack(spacing: 22) {
                 header
                 worldPicker
+                section("Opponent") {
+                    Picker("Opponent", selection: $versusComputer) {
+                        Label("Two players", systemImage: "person.2.fill").tag(false)
+                        Label("Vs computer", systemImage: "cpu").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    if versusComputer {
+                        segmented("Difficulty", selection: $difficulty, options: Difficulty.allCases) { $0.name }
+                    }
+                }
                 section("Match") {
                     Stepper(value: $rounds, in: 1...10) {
                         LabeledContent("Rounds", value: "\(rounds)")
@@ -126,7 +138,8 @@ struct TitleView: View {
     private func start() {
         onStart(MatchSettings(
             rounds: rounds, startingMoney: startingMoney, world: world, weather: weather,
-            wind: wind, roughness: roughness, volume: volume, hapticsEnabled: hapticsEnabled
+            wind: wind, roughness: roughness, volume: volume, hapticsEnabled: hapticsEnabled,
+            computerOpponent: versusComputer ? difficulty : nil
         ))
     }
 }

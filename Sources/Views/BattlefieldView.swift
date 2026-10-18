@@ -70,7 +70,7 @@ struct BattlefieldView: View {
             }
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                guard game.phase == .aiming else { return }
+                guard game.phase == .aiming, !game.isComputerTurn else { return }
                 let delta = mapper.world(value.location) - game.current.turretCenter
                 game.setAngle(atan2(max(delta.y, 0), delta.x) * 180 / .pi)
             })

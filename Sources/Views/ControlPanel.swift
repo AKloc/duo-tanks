@@ -24,6 +24,7 @@ struct ControlPanel: View {
 
     private func controls(for tank: Tank) -> some View {
         let money = game.players.first { $0.id == tank.id }?.money ?? 0
+        let isComputer = game.isComputerTurn
         return HStack(spacing: 20) {
             VStack(spacing: 10) {
                 HStack(spacing: 10) {
@@ -67,16 +68,24 @@ struct ControlPanel: View {
                         .font(.system(.largeTitle, design: .rounded).bold().monospacedDigit())
                         .foregroundStyle(game.chargePower == nil ? .secondary : .primary)
                         .contentTransition(.numericText())
-                    Text(game.chargePower == nil ? "last power · hold FIRE to charge" : "power")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if isComputer {
+                        Label(game.computerStatus ?? "Computer's turn", systemImage: "cpu")
+                            .font(.caption.bold())
+                            .foregroundStyle(tank.color)
+                            .transaction { $0.animation = nil }
+                    } else {
+                        Text(game.chargePower == nil ? "last power · hold FIRE to charge" : "power")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
                 }
             }
 
-            ArcadeButton(color: tank.color, charge: game.chargePower, hapticsEnabled: game.settings.hapticsEnabled, onPress: game.beginCharge, onRelease: game.releaseCharge)
+            ArcadeButton(color: tank.color, charge: game.chargePower, hapticsEnabled: game.settings.hapticsEnabled, onPress: game.beginCharge, onRelease: { game.releaseCharge() })
         }
         .disabled(game.phase != .aiming)
+        .allowsHitTesting(!isComputer)
     }
 
     private func weaponMenu(for tank: Tank) -> some View {

@@ -53,6 +53,10 @@ You earn **$40 per point of damage** to opponents, **$2,500 per kill** (includin
 
 Tanks that lose the ground under them fall and take damage, and destroyed tanks cook off in a small blast.
 
+## Playing the computer
+
+Choose **Vs computer** on the title screen and pick Easy, Normal or Hard. The computer predicts its shots with the same physics as the game, misjudges the wind and adds aiming error according to difficulty, and tightens its aim over repeated shots the way a person brackets a target. It raises shields, patches itself up, picks weapons to suit the terrain, avoids shots that would hit itself, and does its own shopping between rounds.
+
 ## Worlds and weather
 
 Pick a world on the title screen, or let each round roll a random one:
