@@ -15,6 +15,7 @@ struct TitleView: View {
     @AppStorage("music") private var musicEnabled = true
     @AppStorage("opponent") private var versusComputer = false
     @AppStorage("difficulty") private var difficulty = Difficulty.normal
+    @AppStorage("handoff") private var handoffEnabled = true
 
     private static let moneyOptions = [5_000, 15_000, 30_000, 50_000]
 
@@ -31,6 +32,15 @@ struct TitleView: View {
                     .pickerStyle(.segmented)
                     if versusComputer {
                         segmented("Difficulty", selection: $difficulty, options: Difficulty.allCases) { $0.name }
+                    } else {
+                        Toggle(isOn: $handoffEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Fold to hand off")
+                                Text("Hide your turn and shop until the next player unfolds the phone. Lay it flat for tabletop play instead.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
                 section("Match") {

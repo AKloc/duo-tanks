@@ -6,6 +6,8 @@ struct ControlPanel: View {
     let onQuit: () -> Void
 
     @AppStorage("music") private var musicEnabled = true
+    @AppStorage("layout") private var layout = LayoutSetting.auto
+    @AppStorage("handoff") private var handoffEnabled = true
 
     var body: some View {
         Group {
@@ -58,6 +60,13 @@ struct ControlPanel: View {
                     Menu {
                         Text("\(game.theme.name) · gravity \(Int(game.theme.gravityScale * 100))%")
                         Toggle("Music", systemImage: "music.note", isOn: $musicEnabled)
+                        Picker("Layout", systemImage: "rectangle.split.1x2", selection: $layout) {
+                            ForEach(LayoutSetting.allCases) { Text($0.name).tag($0) }
+                        }
+                        .pickerStyle(.menu)
+                        if game.players.allSatisfy({ !$0.isComputer }) {
+                            Toggle("Fold to Hand Off", systemImage: "eye.slash", isOn: $handoffEnabled)
+                        }
                         Button("Quit to Title", systemImage: "xmark", role: .destructive, action: onQuit)
                     } label: {
                         Image(systemName: "ellipsis.circle").font(.title3)

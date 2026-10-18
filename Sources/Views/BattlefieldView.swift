@@ -6,6 +6,14 @@ struct BattlefieldView: View {
     private static let moonlight = Vec(0.45, 0.89)
 
     let game: Game
+    /// Follows the action with its own camera (director mode).
+    var director: DirectorCamera?
+    /// Outlines what `viewport`'s camera is showing (the mini-map).
+    var viewport: DirectorCamera?
+    /// A second copy of the battlefield on screen; it stays quiet so thunder isn't doubled.
+    var isSecondary = false
+    /// When set, the view is scaled so this much of the world's height always fits, instead of filling the width.
+    var fitHeight: Double?
 
     @State private var ambience = Ambience()
     @State private var soils: [WorldTheme: Image] = [:]
@@ -35,11 +43,14 @@ struct BattlefieldView: View {
             let mapper = WorldMapper(size: proxy.size, camera: camera)
             TimelineView(.animation) { timeline in
                 let time = timeline.date.timeIntervalSinceReferenceDate
+                let view = camera ?? director?.update(game: game, time: time)
+                let mapper = WorldMapper(size: proxy.size, camera: view, fitHeight: fitHeight)
+                let _ = director?.record(visible: view == nil ? nil : mapper.visibleWorld(in: proxy.size))
                 let blasts = explosions.map { e in
                     let p = mapper.screen(e.center)
                     return Vec(p.x / proxy.size.width, p.y / proxy.size.height)
                 }
-                let _ = ambience.update(time: time, wind: wind, blasts: blasts, weather: weather, onStrike: game.thunder)
+                let _ = ambience.update(time: time, wind: wind, blasts: blasts, weather: weather, onStrike: isSecondary ? {} : game.thunder)
                 Canvas { context, size in
                     drawSky(look, weather: weather, in: &context, size: size, mapper: mapper, time: time)
                     // Buried tanks go behind the ground so the dirt covers them.
@@ -74,8 +85,14 @@ struct BattlefieldView: View {
                     drawVignette(in: &context, size: size)
                     if isKillCam {
                         drawKillCamFrame(in: &context, size: size)
-                    } else {
+                    } else if viewport == nil {
                         drawWind(wind, in: &context, size: size)
+                    }
+                    if let frame = viewport?.visibleWorld {
+                        let topLeft = mapper.screen(Vec(frame.minX, frame.maxY))
+                        let bottomRight = mapper.screen(Vec(frame.maxX, frame.minY))
+                        let box = CGRect(x: topLeft.x, y: topLeft.y, width: bottomRight.x - topLeft.x, height: bottomRight.y - topLeft.y)
+                        context.stroke(Path(roundedRect: box, cornerRadius: 4), with: .color(.white.opacity(0.85)), lineWidth: 1.5)
                     }
                     if ambience.lightningFlash > 0.01 {
                         context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(red: 0.85, green: 0.9, blue: 1).opacity(ambience.lightningFlash * 0.35)))
@@ -155,12 +172,14 @@ struct BattlefieldView: View {
         }
 
         for (layer, ridge) in look.ridges.enumerated() {
+            let span = mapper.visibleX
+            let from = min(0, span.lowerBound), to = max(Game.worldSize.x, span.upperBound)
             var path = Path()
-            path.move(to: mapper.screen(Vec(0, 0)))
-            for x in stride(from: 0.0, through: Game.worldSize.x, by: 6) {
+            path.move(to: mapper.screen(Vec(from, -10)))
+            for x in stride(from: from, through: to, by: 6) {
                 path.addLine(to: mapper.screen(Vec(x, ridgeHeight(x, layer: layer, ridge: ridge, shape: look.ridgeShape))))
             }
-            path.addLine(to: mapper.screen(Vec(Game.worldSize.x, 0)))
+            path.addLine(to: mapper.screen(Vec(to, -10)))
             path.closeSubpath()
             context.fill(path, with: .color(ridge.color))
 
@@ -370,21 +389,26 @@ struct BattlefieldView: View {
         let heights = terrain.heights
         let last = terrain.width - 1
 
+        // Past the world's edges (when letterboxed) the ground carries on level, so there are no bare strips.
+        let leftEdge = min(0, mapper.visibleX.lowerBound - 10), rightEdge = max(Double(last), mapper.visibleX.upperBound + 10)
         var surface = Path()
-        surface.move(to: mapper.screen(Vec(0, heights[0])))
+        surface.move(to: mapper.screen(Vec(leftEdge, heights[0])))
+        surface.addLine(to: mapper.screen(Vec(0, heights[0])))
         for x in stride(from: 2, to: terrain.width, by: 2) {
             surface.addLine(to: mapper.screen(Vec(Double(x), heights[x])))
         }
         surface.addLine(to: mapper.screen(Vec(Double(last), heights[last])))
+        surface.addLine(to: mapper.screen(Vec(rightEdge, heights[last])))
 
         var groundPath = surface
-        groundPath.addLine(to: mapper.screen(Vec(Double(last), -10)))
-        groundPath.addLine(to: mapper.screen(Vec(0, -10)))
+        groundPath.addLine(to: mapper.screen(Vec(rightEdge, -10)))
+        groundPath.addLine(to: mapper.screen(Vec(leftEdge, -10)))
         groundPath.closeSubpath()
 
         var ground = context
         ground.clip(to: groundPath)
         let worldRect = CGRect(origin: mapper.screen(Vec(0, Game.worldSize.y)), size: CGSize(width: Game.worldSize.x * s, height: Game.worldSize.y * s))
+        ground.fill(groundPath, with: .color(look.ridges.last?.color.mix(with: Color(red: 0.4, green: 0.28, blue: 0.16), by: 0.6) ?? .brown))
         if let soil {
             ground.draw(soil, in: worldRect)
         } else {
@@ -845,12 +869,20 @@ struct BattlefieldView: View {
 struct WorldMapper {
     let scale: Double
     let origin: CGPoint
+    let viewWidth: Double
 
-    init(size: CGSize, camera: Camera? = nil) {
-        let fit = size.width / Game.worldSize.x
+    /// World x coordinates at the left and right edges of the view, which can lie beyond the world when it's letterboxed.
+    var visibleX: ClosedRange<Double> {
+        ((0 - origin.x) / scale)...((viewWidth - origin.x) / scale)
+    }
+
+    init(size: CGSize, camera: Camera? = nil, fitHeight: Double? = nil) {
+        viewWidth = size.width
+        var fit = size.width / Game.worldSize.x
+        if let fitHeight { fit = min(fit, size.height / fitHeight) }
         guard let camera else {
             scale = fit
-            origin = CGPoint(x: 0, y: size.height)
+            origin = CGPoint(x: (size.width - Game.worldSize.x * fit) / 2, y: size.height)
             return
         }
         scale = fit * camera.zoom
@@ -865,5 +897,11 @@ struct WorldMapper {
 
     func world(_ p: CGPoint) -> Vec {
         Vec((p.x - origin.x) / scale, (origin.y - p.y) / scale)
+    }
+
+    /// The part of the world showing in a view of this size.
+    func visibleWorld(in size: CGSize) -> CGRect {
+        let topLeft = world(.zero), bottomRight = world(CGPoint(x: size.width, y: size.height))
+        return CGRect(x: topLeft.x, y: bottomRight.y, width: bottomRight.x - topLeft.x, height: topLeft.y - bottomRight.y)
     }
 }

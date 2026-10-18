@@ -10,6 +10,14 @@ Hold the Duo half-open like a tiny laptop: the battlefield is on the top half an
 
 Flat or folded, aim by dragging on the battlefield or using the angle stepper.
 
+## Built for the Duo
+
+Every way of holding the phone does something:
+
+- **Half-open (laptop):** the hinge aims your barrel. While a shot is in flight, the top half becomes a chase camera riding with the shell and the bottom half becomes a mini-map of the whole battlefield, with a box showing what the camera sees.
+- **Lying flat:** tabletop mode. Lay the phone fully open and face-up between two players and the screen splits at the fold: each half shows the battlefield and that player's own controls, turned to face them, so nobody passes the phone. You can also pick Tabletop (or force Standard) from the in-game menu.
+- **Folding:** in pass-and-play, the phone covers itself between turns. Fold it to hand it over, and the next player unfolds it to start their turn. Shops and gear stay private, so nobody sees what you've bought. Turn this off on the title screen, or tap "I'm Blue, let's go" to skip the fold.
+
 ## Firing
 
 Press and hold the big arcade **FIRE** button to charge your shot: the ring around it fills from 0 to 100% over two seconds. Let go to fire. Your last shot's power stays on screen as a reference.

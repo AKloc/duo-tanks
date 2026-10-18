@@ -391,6 +391,7 @@ final class Game {
 
 
 
+
     private func scheduleComputerTurn() {
         guard phase == .aiming, let difficulty = players.first(where: { $0.id == current.id })?.computer else { return }
         computerTask = Task { [weak self] in
