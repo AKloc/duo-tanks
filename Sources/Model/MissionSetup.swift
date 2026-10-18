@@ -11,7 +11,8 @@ struct EnemySpec {
     var shield = 0.0
     var shieldRegen = 0.0
     var shieldCap = Tank.maxShield
-    var inventory = Inventory(ammo: [.missile: 10])
+    /// Regular enemies fire Shells; bosses bring bigger guns.
+    var inventory = Inventory()
     /// Never takes a turn: a practice target, or a boss pod waiting its turn.
     var isDummy = false
     /// Aims no better than this, whatever the difficulty.
@@ -30,6 +31,7 @@ struct MissionSetup {
     var playerX: Double
     var playerInventory: Inventory
     var enemies: [EnemySpec]
+    var playerHealth = 100.0
     /// Center the Sky Leviathan circles around, if it's in this mission.
     var leviathanHome: Vec?
 
@@ -38,6 +40,7 @@ struct MissionSetup {
     static func make(_ mission: Mission, difficulty: TourDifficulty) -> MissionSetup {
         var setup = layout(for: mission)
         setup.playerInventory.parachutes += difficulty.bonusParachutes
+        setup.playerHealth = difficulty.playerHealth
         for i in setup.enemies.indices where !setup.enemies[i].fixedHealth {
             setup.enemies[i].health = (setup.enemies[i].health * difficulty.enemyHealthScale).rounded()
         }
@@ -98,8 +101,8 @@ struct MissionSetup {
             return MissionSetup(
                 terrain: terrain, wind: -15...15, playerX: 160,
                 playerInventory: Inventory(ammo: [.missile: 6, .babyNuke: 2, .funkyBomb: 2], shields: 1, repairKits: 1, fuel: 30),
-                enemies: [EnemySpec(name: "The Bastion", color: Color(red: 0.55, green: 0.55, blue: 0.5), x: 860, health: 300, kind: .bastion,
-                                    radius: 26, shield: 50, shieldRegen: 25, shieldCap: 50, inventory: Inventory(ammo: [.missile: 40]))]
+                enemies: [EnemySpec(name: "The Bastion", color: Color(red: 0.55, green: 0.55, blue: 0.5), x: 860, health: 240, kind: .bastion,
+                                    radius: 26, shield: 40, shieldRegen: 20, shieldCap: 40, inventory: Inventory(ammo: [.missile: 8]))]
             )
         case "aerie-1":
             return MissionSetup(
@@ -214,8 +217,8 @@ struct MissionSetup {
                 enemies: [EnemySpec(name: "Target", color: .orange, x: 700, health: 45, isDummy: true, fixedHealth: true)]
             )
         case "cinder-5":
-            var terrain = ground(seed: 45) { x in 110 + 60 * sin(x / 95) }
-            terrain.addHazards(lavaLevel: 75, vents: [500])
+            var terrain = ground(seed: 45) { x in 100 + 120 * exp(-pow((x - 500) / 90, 2)) + 30 * sin(x / 70) }
+            terrain.addHazards(lavaLevel: 75, vents: [330])
             return MissionSetup(
                 terrain: terrain, wind: -10...10, playerX: 500,
                 playerInventory: Inventory(ammo: [.missile: 4], parachutes: 1, fuel: 30),
@@ -290,8 +293,8 @@ struct MissionSetup {
             return MissionSetup(
                 terrain: terrain, wind: -12...12, playerX: 150,
                 playerInventory: Inventory(ammo: [.missile: 6, .babyNuke: 2, .dirtClod: 3], parachutes: 1, shields: 1, repairKits: 1, fuel: 60),
-                enemies: [EnemySpec(name: "The Icebreaker", color: Color(red: 0.55, green: 0.65, blue: 0.75), x: 830, health: 320, kind: .icebreaker,
-                                    radius: 20, inventory: Inventory(ammo: [.missile: 40]))]
+                enemies: [EnemySpec(name: "The Icebreaker", color: Color(red: 0.55, green: 0.65, blue: 0.75), x: 830, health: 200, kind: .icebreaker,
+                                    radius: 20)]
             )
         case "rift-1":
             return MissionSetup(

@@ -100,7 +100,7 @@ struct BossTests {
         #expect(abs(game.tanks[1].position.x - game.tanks[0].position.x) > 200, "it surfaces away from you")
     }
 
-    @Test func theIcebreakersPlowHalvesBlastsFromTheFront() {
+    @Test func theIcebreakersPlowBlocksBlastsFromTheFront() {
         let game = Game(mission: Mission.with(id: "glacia-boss")!, difficulty: .normal, settings: settings())
         game.place(tank: 0, at: game.tanks[1].position + Vec(-60, 0))
         game.runUntilSettled()
@@ -108,7 +108,7 @@ struct BossTests {
         game.fireForTesting(weapon: .missile, angle: 30, power: 10)
         game.runUntilSettled()
         let taken = game.tanks[1].maxHealth - game.tanks[1].health
-        #expect(taken > 0 && taken <= 40, "armored hit took \(taken)")
+        #expect(taken > 0 && taken <= Weapon.missile.damage * 0.6 + 0.5, "armored hit took \(taken)")
     }
 
     @Test func theMothershipFliesAsASingleBoss() {

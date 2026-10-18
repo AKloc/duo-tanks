@@ -442,6 +442,8 @@ final class Game {
         var player = Tank(id: 0, name: you.name, color: you.color, position: Vec(start.x, terrain.support(at: start.x, y: start.y + 1)),
                           angle: 60, inventory: setup.playerInventory)
         player.team = 0
+        player.maxHealth = setup.playerHealth
+        player.health = setup.playerHealth
         if player.ammoCount(.babyMissile) == 0, let first = Weapon.arsenal.first(where: { (player.ammoCount($0) ?? 1) > 0 }) {
             player.selectedWeapon = first
         }
@@ -1324,7 +1326,7 @@ final class Game {
             let falloff = distance / reach
             var amount = weapon.damage * (1 - falloff * falloff)
             if tanks[i].kind == .icebreaker, (center.x - tanks[i].position.x) * (tanks[i].angle <= 90 ? 1 : -1) > 4 {
-                amount *= 0.5
+                amount *= 0.6
                 floatingTexts.append(FloatingText(position: tanks[i].turretCenter + Vec(0, 40), text: "Armored", color: .cyan))
             }
             damage(tankAt: i, by: amount, attackerID: ownerID)
@@ -1975,6 +1977,45 @@ extension Game {
         loop?.cancel()
         loop = nil
         _ = advance(by: 1.0 / 60)
+    }
+
+    /// Plays the current tank's turn on the spot, the way the computer would: picks a weapon, aims with the
+    /// game's own shot prediction plus the given error, and fires. The Mothership abducts on its alternate turns.
+    func playTurnForTesting(angleError: Double = 0, powerError: Double = 0) {
+        computerTask?.cancel()
+        computerTask = nil
+        updateIslandDrift(0, snap: true)
+        guard phase == .aiming else { return }
+        if current.kind == .mothership, mothershipTurns % 2 == 0 {
+            abduct()
+            return
+        }
+        let me = current
+        guard let target = tanks.filter({ $0.isAlive && $0.side != me.side })
+            .min(by: { abs($0.position.x - me.position.x) < abs($1.position.x - me.position.x) }) else { return }
+        let owned = { (weapon: Weapon) in (me.ammoCount(weapon) ?? 1) > 0 }
+        let weapon: Weapon = if owned(.babyNuke), target.health > 70 { .babyNuke }
+            else if owned(.missile) { .missile }
+            else if owned(.babyMissile) { .babyMissile }
+            else { Weapon.arsenal.first(where: owned) ?? .babyMissile }
+        let ballistics = Ballistics(
+            terrain: terrain, wind: wind, gravity: gravity, speedPerPower: launchSpeed(forPower: 1),
+            origin: me.turretCenter, ownerID: me.id,
+            tanks: tanks.filter(\.isAlive).map { .init(id: $0.id, center: $0.turretCenter, radius: $0.radius) }
+        )
+        let aim = ballistics.bestAim(at: target.turretCenter, safeRadius: weapon.blastRadius + me.radius + 10)
+        select(weapon)
+        setAngle((aim?.angle ?? (target.position.x > me.position.x ? 50 : 130)) + angleError)
+        tanks[currentIndex].power = min(max((aim?.power ?? 60) + powerError, 5), 100)
+        fire()
+        loop?.cancel()
+        loop = nil
+    }
+
+    func abductForTesting() {
+        abduct()
+        loop?.cancel()
+        loop = nil
     }
 
     /// Steps the game in 60 Hz frames until the shot and everything it set off has settled.

@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Match setup. Choices are remembered between launches.
-struct TitleView: View {
+/// Quick match setup. Choices are remembered between launches.
+struct QuickMatchView: View {
     let onStart: (MatchSettings) -> Void
-    let onTour: () -> Void
+    let onBack: () -> Void
 
     @AppStorage("rounds") private var rounds = 5
     @AppStorage("startingMoney") private var startingMoney = 15_000
@@ -24,20 +24,6 @@ struct TitleView: View {
         ScrollView {
             VStack(spacing: 22) {
                 header
-                Button(action: onTour) {
-                    VStack(spacing: 2) {
-                        PlateLabel(title: "The Tour", systemImage: "globe.americas.fill", size: .large)
-                        Text("Campaign · five worlds, five bosses")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.75))
-                    }
-                    .frame(maxWidth: 320)
-                    .padding(.vertical, 4)
-                }
-                .buttonStyle(.plate(.teal, .primary, size: .large))
-                Text("OR SET UP A QUICK MATCH")
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
                 worldPicker
                 section("Opponent") {
                     Picker("Opponent", selection: $versusComputer) {
@@ -77,20 +63,6 @@ struct TitleView: View {
                     segmented("Wind", selection: $wind, options: WindSetting.allCases) { $0.name }
                     segmented("Terrain", selection: $roughness, options: Roughness.allCases) { $0.name }
                 }
-                section("Sound and feel") {
-                    LabeledContent("Volume") {
-                        Slider(value: $volume, in: 0...1) {
-                            Text("Volume")
-                        } minimumValueLabel: {
-                            Image(systemName: "speaker.fill")
-                        } maximumValueLabel: {
-                            Image(systemName: "speaker.wave.3.fill")
-                        }
-                        .frame(maxWidth: 300)
-                    }
-                    Toggle("Music", isOn: $musicEnabled)
-                    Toggle("Haptics", isOn: $hapticsEnabled)
-                }
                 Button(action: start) {
                     PlateLabel(title: "Start Match", systemImage: "flame.fill", size: .large)
                         .frame(maxWidth: 320)
@@ -112,28 +84,17 @@ struct TitleView: View {
     }
 
     private var header: some View {
-        VStack(spacing: 6) {
-            Text("DUO")
-                .font(.system(size: 15, weight: .semibold).width(.expanded))
-                .tracking(14)
-                .padding(.leading, 14)
-                .foregroundStyle(.orange)
-            Text("TANKS")
-                .font(.system(size: 64, weight: .black).width(.expanded))
-                .tracking(-1)
+        HStack {
+            Button(action: onBack) { PlateLabel(title: "Back", systemImage: "chevron.left", size: .small) }
+                .buttonStyle(.plate(size: .small))
+            Spacer()
+            Text("QUICK MATCH")
+                .font(.system(size: 30, weight: .black).width(.expanded))
                 .foregroundStyle(LinearGradient(colors: [Color(white: 0.97), Color(white: 0.72)], startPoint: .top, endPoint: .bottom))
-                .shadow(color: .black.opacity(0.5), radius: 0, y: 3)
-            Capsule()
-                .fill(.orange)
-                .frame(width: 64, height: 3)
-                .padding(.top, 2)
-            Text("A turn-based artillery duel")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .padding(.top, 6)
+            Spacer()
+            Color.clear.frame(width: 80, height: 1)
         }
-        .accessibilityElement(children: .combine)
-        .padding(.top, 28)
+        .padding(.top, 20)
     }
 
     private var worldPicker: some View {

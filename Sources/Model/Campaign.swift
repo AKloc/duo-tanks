@@ -25,6 +25,15 @@ enum TourDifficulty: String, CaseIterable, Identifiable, Codable {
         }
     }
 
+    /// Your tank's health on the Tour.
+    var playerHealth: Double {
+        switch self {
+        case .easy: 150
+        case .normal: 120
+        case .hard: 100
+        }
+    }
+
     var bonusParachutes: Int {
         switch self {
         case .easy: 2
@@ -62,8 +71,8 @@ enum TourDifficulty: String, CaseIterable, Identifiable, Codable {
 
     var summary: String {
         switch self {
-        case .easy: "Long aim guide, weaker enemies, extra parachutes, hints after one miss."
-        case .normal: "Short aim guide and hints if you get stuck."
+        case .easy: "Long aim guide, extra armor, weaker enemies, extra parachutes, hints after one miss."
+        case .normal: "Short aim guide, a little extra armor, and hints if you get stuck."
         case .hard: "No aim guide, tougher enemies, no hints."
         }
     }
@@ -242,7 +251,7 @@ struct Mission: Identifiable, Equatable {
                 objective: .survive(turns: 4), par: 8),
         Mission(id: "glacia-boss", chapter: .glacia, number: 6, title: "The Icebreaker",
                 briefing: "A plow tank with an armored nose is grinding across the ice toward you. It rams.",
-                tip: "Its front plow halves your damage. Lob shells high so they come down on top of it.",
+                tip: "Its front plow blocks a lot of damage. Lob shells high so they come down on top of it.",
                 objective: .destroyAll, par: 10, isBoss: true),
         Mission(id: "rift-1", chapter: .rift, number: 1, title: "One Small Step",
                 briefing: "Low gravity, no air, no wind. Shots float a long way.",
@@ -310,6 +319,11 @@ final class TourProgress {
         guard let index = Chapter.allCases.firstIndex(of: chapter), index > 0 else { return true }
         let previous = Chapter.allCases[index - 1]
         return previous.missions.last.map(isBeaten) ?? true
+    }
+
+    /// The first unlocked mission not yet beaten, in Tour order; the final boss once everything is done.
+    var nextMission: Mission {
+        Mission.all.first { isUnlocked($0) && !isBeaten($0) } ?? Mission.all.last!
     }
 
     func record(_ mission: Mission, stars: Int) {

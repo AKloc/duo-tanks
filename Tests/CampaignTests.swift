@@ -20,6 +20,8 @@ struct CampaignTests {
             let player = game.tanks[0]
             #expect(!player.isBuried(in: game.terrain))
             #expect(!game.terrain.isInAbyss(player.position), "\(mission.id): the player starts on solid ground")
+            #expect(!game.terrain.isInLava(x: player.position.x, y: player.position.y), "\(mission.id): the player starts out of the lava")
+            #expect(player.maxHealth == difficulty.playerHealth)
             #expect(game.terrain.support(at: player.position.x, y: player.position.y) == player.position.y)
             #expect(player.inventory.hasAmmo)
             for enemy in game.tanks.dropFirst() {
@@ -28,6 +30,9 @@ struct CampaignTests {
                 if !enemy.isAnchored {
                     #expect(!game.terrain.isInAbyss(enemy.position), "\(mission.id): \(enemy.name) starts on solid ground")
                     #expect(!enemy.isBuried(in: game.terrain))
+                    if enemy.kind == .standard {
+                        #expect(!game.terrain.isInLava(x: enemy.position.x, y: enemy.position.y), "\(mission.id): \(enemy.name) starts out of the lava")
+                    }
                 }
             }
         }
@@ -109,7 +114,7 @@ struct CampaignTests {
     @Test func theBastionRechargesItsShield() {
         let game = Game(mission: Mission.with(id: "terra-boss")!, difficulty: .normal, settings: settings())
         #expect(game.tanks[1].kind == .bastion)
-        #expect(game.tanks[1].shield == 50)
+        #expect(game.tanks[1].shield == game.tanks[1].shieldCap)
         #expect(game.tanks[1].shieldRegen > 0)
     }
 

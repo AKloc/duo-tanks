@@ -11,30 +11,34 @@ struct DuoTanksApp: App {
 
 struct RootView: View {
     private enum Screen: Equatable {
-        case title, tour
+        case menu, quickMatch, tour
         case playing(Game, fromTour: Bool)
 
         static func == (a: Screen, b: Screen) -> Bool {
             switch (a, b) {
-            case (.title, .title), (.tour, .tour): true
+            case (.menu, .menu), (.quickMatch, .quickMatch), (.tour, .tour): true
             case let (.playing(x, _), .playing(y, _)): x === y
             default: false
             }
         }
     }
 
-    @State private var screen = Screen.title
+    @State private var screen = Screen.menu
+    @AppStorage("tourDifficulty") private var tourDifficulty = TourDifficulty.normal
 
     var body: some View {
         Group {
             switch screen {
-            case .title:
-                TitleView(onStart: { settings in screen = .playing(Game(settings: settings), fromTour: false) },
-                          onTour: { screen = .tour })
+            case .menu:
+                MainMenuView(onContinueTour: { play($0, tourDifficulty) }, onTourMap: { screen = .tour },
+                             onQuickMatch: { screen = .quickMatch }, onResumeMatch: nil, resumeSummary: nil)
+            case .quickMatch:
+                QuickMatchView(onStart: { settings in screen = .playing(Game(settings: settings), fromTour: false) },
+                               onBack: { screen = .menu })
             case .tour:
-                TourView(onPlay: play, onBack: { screen = .title })
+                TourView(onPlay: play, onBack: { screen = .menu })
             case let .playing(game, fromTour):
-                GameView(game: game, onQuit: { screen = fromTour ? .tour : .title }, onPlayMission: play)
+                GameView(game: game, onQuit: { screen = fromTour ? .tour : .menu }, onPlayMission: play)
             }
         }
         .transition(.opacity)
