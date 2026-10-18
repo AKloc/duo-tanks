@@ -7,12 +7,17 @@ struct Inventory {
     var repairKits = 0
     /// World units of driving left.
     var fuel = 0.0
+    /// Shells are normally free and endless; trick-shot missions take them away.
+    var hasUnlimitedShells = true
 
     static let starting = Inventory(ammo: [.missile: 2], fuel: 30)
 
+    /// Something left to shoot.
+    var hasAmmo: Bool { hasUnlimitedShells || ammo.values.contains { $0 > 0 } }
+
     /// `nil` means unlimited.
     func count(of weapon: Weapon) -> Int? {
-        weapon.isUnlimited ? nil : ammo[weapon, default: 0]
+        weapon.isUnlimited && hasUnlimitedShells ? nil : ammo[weapon, default: 0]
     }
 
     func count(of item: ShopItem) -> Int {
@@ -46,6 +51,8 @@ struct Player: Identifiable {
     var inventory = Inventory.starting
     /// `nil` for a person.
     var computer: Difficulty?
+    /// Never takes a turn.
+    var isDummy = false
 
     var isComputer: Bool { computer != nil }
 }
@@ -62,6 +69,16 @@ struct MatchSettings {
     var musicEnabled = true
     /// `nil` for two people passing the phone.
     var computerOpponent: Difficulty?
+
+    /// Sound and feel as last set on the title screen.
+    static func saved() -> MatchSettings {
+        let defaults = UserDefaults.standard
+        var settings = MatchSettings()
+        if defaults.object(forKey: "volume") != nil { settings.volume = defaults.double(forKey: "volume") }
+        if defaults.object(forKey: "haptics") != nil { settings.hapticsEnabled = defaults.bool(forKey: "haptics") }
+        if defaults.object(forKey: "music") != nil { settings.musicEnabled = defaults.bool(forKey: "music") }
+        return settings
+    }
 }
 
 /// Money earned this round, broken down for the results screen.

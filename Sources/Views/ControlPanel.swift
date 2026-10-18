@@ -4,6 +4,7 @@ struct ControlPanel: View {
     let game: Game
     let hinge: HingeState?
     let onQuit: () -> Void
+    var onPlayMission: (Mission, TourDifficulty) -> Void = { _, _ in }
 
     @AppStorage("music") private var musicEnabled = true
     @AppStorage("layout") private var layout = LayoutSetting.auto
@@ -18,6 +19,8 @@ struct ControlPanel: View {
                 RoundResults(game: game, winnerID: winnerID)
             case .matchOver:
                 MatchResults(game: game, onQuit: onQuit)
+            case let .missionOver(won, stars):
+                MissionResults(game: game, won: won, stars: stars, onQuit: onQuit, onPlayMission: onPlayMission)
             case .killCam:
                 VStack(spacing: 10) {
                     Label("Kill cam", systemImage: "video.fill")
@@ -60,7 +63,7 @@ struct ControlPanel: View {
                 HStack(spacing: 10) {
                     Circle().fill(tank.color).frame(width: 12, height: 12)
                     Text("\(tank.name)'s turn").font(.headline)
-                    Text("Round \(game.round)/\(game.settings.rounds)")
+                    Text(roundText(short: false))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -100,7 +103,7 @@ struct ControlPanel: View {
             HStack(spacing: 8) {
                 Circle().fill(tank.color).frame(width: 10, height: 10)
                 Text(tank.name).font(.headline)
-                Text("R\(game.round)/\(game.settings.rounds)").font(.caption).foregroundStyle(.secondary)
+                Text(roundText(short: true)).font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 moneyLabel(for: tank)
                 HealthLabel(health: tank.health, shield: tank.shield).font(.subheadline)
@@ -134,8 +137,7 @@ struct ControlPanel: View {
                     Text(tank.name).font(.subheadline.bold())
                 }
                 HealthLabel(health: tank.health, shield: tank.shield).font(.caption)
-                let money = (game.players.first { $0.id == tank.id }?.money ?? 0).formatted(.currency(code: "USD").precision(.fractionLength(0)))
-                Text("R\(game.round)/\(game.settings.rounds) · \(money)")
+                Text("\(roundText(short: true)) · \(scoreText(for: tank))")
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -158,9 +160,21 @@ struct ControlPanel: View {
     }
 
     private func moneyLabel(for tank: Tank) -> some View {
-        Text(game.players.first { $0.id == tank.id }?.money ?? 0, format: .currency(code: "USD").precision(.fractionLength(0)))
+        Text(scoreText(for: tank))
             .font(.subheadline.monospacedDigit())
             .foregroundStyle(.secondary)
+    }
+
+    /// The round in a match, or the mission code on the Tour.
+    private func roundText(short: Bool) -> String {
+        if let run = game.mission { return short ? run.mission.code : "\(run.mission.code) \(run.mission.title)" }
+        return short ? "R\(game.round)/\(game.settings.rounds)" : "Round \(game.round)/\(game.settings.rounds)"
+    }
+
+    /// Money in a match, or shots against par on the Tour.
+    private func scoreText(for tank: Tank) -> String {
+        if let run = game.mission { return "Shots \(run.shots) · par \(run.shotsUnderPar)" }
+        return (game.players.first { $0.id == tank.id }?.money ?? 0).formatted(.currency(code: "USD").precision(.fractionLength(0)))
     }
 
     private var moreMenu: some View {
@@ -174,7 +188,12 @@ struct ControlPanel: View {
             if game.players.allSatisfy({ !$0.isComputer }) {
                 Toggle("Private Turns", systemImage: "eye.slash", isOn: $handoffEnabled)
             }
-            Button("Quit to Title", systemImage: "xmark", role: .destructive, action: onQuit)
+            if game.mission != nil {
+                Button("Restart Mission", systemImage: "arrow.counterclockwise", action: game.restartMission)
+                Button("Back to the Tour", systemImage: "map", role: .destructive, action: onQuit)
+            } else {
+                Button("Quit to Title", systemImage: "xmark", role: .destructive, action: onQuit)
+            }
         } label: {
             Image(systemName: "ellipsis.circle").font(.title3)
         }
@@ -389,6 +408,46 @@ struct RoundResults: View {
                            systemImage: game.round >= game.settings.rounds ? "trophy.fill" : "cart.fill")
             }
             .buttonStyle(.plate(winner?.color ?? .orange, .primary))
+        }
+    }
+}
+
+struct MissionResults: View {
+    let game: Game
+    let won: Bool
+    let stars: Int
+    let onQuit: () -> Void
+    let onPlayMission: (Mission, TourDifficulty) -> Void
+
+    var body: some View {
+        if let run = game.mission {
+            VStack(spacing: 10) {
+                Text(won ? (run.mission.isBoss ? "Boss defeated!" : "Mission complete") : "Mission failed")
+                    .font(.title2.bold())
+                    .foregroundStyle(won ? .yellow : .red)
+                if won {
+                    StarRow(stars: stars, size: 26)
+                    Text("Shots \(run.shots) (par \(run.shotsUnderPar)) · damage taken \(Int(run.damageTaken.rounded()))")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(run.mission.tip)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 460)
+                }
+                HStack {
+                    Button(action: game.restartMission) { PlateLabel(title: won ? "Replay" : "Retry", systemImage: "arrow.counterclockwise") }
+                        .buttonStyle(.plate(won ? .gray : .red, won ? .secondary : .primary))
+                    if won, let next = run.mission.next, TourProgress.shared.isUnlocked(next) {
+                        Button { onPlayMission(next, run.difficulty) } label: { PlateLabel(title: "Next mission", systemImage: "chevron.right") }
+                            .buttonStyle(.plate(.teal, .primary))
+                    }
+                    Button(action: onQuit) { PlateLabel(title: "Tour", systemImage: "map.fill") }
+                        .buttonStyle(.plate())
+                }
+            }
         }
     }
 }

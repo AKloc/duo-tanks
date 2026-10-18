@@ -6,6 +6,12 @@ enum Difficulty: String, CaseIterable, Identifiable {
     var id: Self { self }
     var name: String { rawValue.capitalized }
 
+    /// This difficulty, or `cap` if that's easier.
+    func capped(at cap: Difficulty?) -> Difficulty {
+        guard let cap, let mine = Difficulty.allCases.firstIndex(of: self), let limit = Difficulty.allCases.firstIndex(of: cap) else { return self }
+        return Difficulty.allCases[min(mine, limit)]
+    }
+
     /// Typical aiming error, in degrees and power points, on a first shot.
     var angleError: Double {
         switch self {

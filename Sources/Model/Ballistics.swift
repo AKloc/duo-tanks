@@ -46,6 +46,31 @@ struct Ballistics: Sendable {
         return nil
     }
 
+    /// Points along a shot's flight, about every 30 ms, ending where it lands.
+    func trajectory(angle: Double, power: Double) -> [Vec] {
+        let radians = angle * .pi / 180
+        let direction = Vec(cos(radians), sin(radians))
+        var position = origin + direction * Tank.barrelLength
+        var velocity = direction * power * speedPerPower
+        var points = [position]
+        let dt = 1.0 / 240
+        var age = 0.0
+        var step = 0
+        while age < 14 {
+            velocity += Vec(wind, terrain.updraft(at: position.x) - gravity) * dt
+            position += velocity * dt
+            age += dt
+            step += 1
+            guard position.x >= 0, position.x <= Game.worldSize.x else { break }
+            if step % 7 == 0 { points.append(position) }
+            if terrain.isSolid(position) || tanks.contains(where: { ($0.id != ownerID || age > 0.3) && ($0.center - position).length < $0.radius }) {
+                points.append(position)
+                break
+            }
+        }
+        return points
+    }
+
     /// The angle and power that land closest to `target`, searching coarsely then refining.
     /// Shots landing within `safeRadius` of the shooter are never chosen.
     func bestAim(at target: Vec, safeRadius: Double = 0) -> Aim? {

@@ -162,6 +162,8 @@ private struct IslandDrift {
     var from: [Int: Vec] = [:]
     var to: [Int: Vec] = [:]
     var riders: [Int: Int] = [:]
+    var creatureFrom: Vec?
+    var creatureTo: Vec?
     var elapsed = 0.0
 }
 
@@ -214,6 +216,29 @@ enum Phase: Equatable {
     case roundOver(winnerID: Int?)
     case shopping(playerIndex: Int)
     case matchOver
+    case missionOver(won: Bool, stars: Int)
+}
+
+/// A Tour mission in progress.
+struct MissionRun {
+    let mission: Mission
+    let difficulty: TourDifficulty
+    let windRange: ClosedRange<Double>
+    var shots = 0
+    var damageTaken = 0.0
+    var enemyTurns = 0
+    var hintShown = false
+
+    var shotsUnderPar: Int { mission.par + difficulty.parAllowance }
+}
+
+/// The Sky Leviathan's flight.
+struct LeviathanFlight {
+    let home: Vec
+    var phase = 0.0
+    var center: Vec
+    /// Tank index of each pod and where it rides relative to the center.
+    var pods: [(index: Int, offset: Vec)]
 }
 
 @MainActor
@@ -276,6 +301,8 @@ final class Game {
     private(set) var driveDirection: Double?
     /// What the computer is doing on its turn, for the control panel.
     private(set) var computerStatus: String?
+    private(set) var mission: MissionRun?
+    private(set) var leviathan: LeviathanFlight?
 
     @ObservationIgnored private let sound = SoundEngine()
     @ObservationIgnored private let haptics = UIImpactFeedbackGenerator(style: .heavy)
@@ -328,6 +355,180 @@ final class Game {
         startMatch(settings)
     }
 
+    convenience init(mission: Mission, difficulty: TourDifficulty, settings base: MatchSettings = MatchSettings()) {
+        var settings = base
+        settings.rounds = 1
+        settings.world = WorldChoice(rawValue: mission.chapter.theme.rawValue) ?? .hills
+        settings.computerOpponent = nil
+        self.init(settings: settings)
+        startMission(mission, difficulty: difficulty)
+    }
+
+    // MARK: Tour missions
+
+    var aimPreviewFraction: Double {
+        guard let mission, phase == .aiming, !isComputerTurn, current.id == 0 else { return 0 }
+        return mission.difficulty.aimPreview
+    }
+
+    var canShowHint: Bool {
+        guard let mission, !mission.hintShown, phase == .aiming, current.id == 0,
+              let threshold = mission.difficulty.hintAfterFailures else { return false }
+        return TourProgress.shared.failures(for: mission.mission) >= threshold
+    }
+
+    func restartMission() {
+        guard let mission else { return }
+        startMission(mission.mission, difficulty: mission.difficulty)
+    }
+
+    private func startMission(_ mission: Mission, difficulty: TourDifficulty) {
+        let setup = MissionSetup.make(mission, difficulty: difficulty)
+        self.mission = MissionRun(mission: mission, difficulty: difficulty, windRange: setup.wind)
+        theme = mission.chapter.theme
+        weather = setup.weather
+        gravity = Game.standardGravity * theme.gravityScale
+        terrain = setup.terrain
+        round = 1
+
+        var you = Player(id: 0, name: "You", color: .red, money: 0)
+        you.inventory = setup.playerInventory
+        players = [you] + setup.enemies.enumerated().map { index, enemy in
+            var player = Player(id: index + 1, name: enemy.name, color: enemy.color, money: 0,
+                                computer: enemy.isDummy ? nil : difficulty.enemyAim.capped(at: enemy.aimCap))
+            player.isDummy = enemy.isDummy
+            player.inventory = enemy.inventory
+            return player
+        }
+
+        let start = terrain.spawnPoint(near: setup.playerX)
+        terrain.flatten(around: start.x, halfWidth: 14, y: start.y)
+        var player = Tank(id: 0, name: you.name, color: you.color, position: Vec(start.x, terrain.support(at: start.x, y: start.y + 1)),
+                          angle: 60, inventory: setup.playerInventory)
+        player.team = 0
+        if player.ammoCount(.babyMissile) == 0, let first = Weapon.arsenal.first(where: { (player.ammoCount($0) ?? 1) > 0 }) {
+            player.selectedWeapon = first
+        }
+        tanks = [player]
+        for (index, enemy) in setup.enemies.enumerated() {
+            let position: Vec
+            if let fixed = enemy.position {
+                position = fixed
+            } else {
+                let spawn = terrain.spawnPoint(near: enemy.x)
+                terrain.flatten(around: spawn.x, halfWidth: enemy.kind == .bastion ? 30 : 14, y: spawn.y)
+                position = Vec(spawn.x, terrain.support(at: spawn.x, y: spawn.y + 1))
+            }
+            var tank = Tank(id: index + 1, name: enemy.name, color: enemy.color, position: position,
+                            angle: position.x > start.x ? 120 : 60, inventory: enemy.inventory)
+            tank.team = 1
+            tank.kind = enemy.kind
+            tank.radius = enemy.radius
+            tank.maxHealth = enemy.health
+            tank.health = enemy.health
+            tank.shield = enemy.shield
+            tank.shieldRegen = enemy.shieldRegen
+            tank.shieldCap = enemy.shieldCap
+            tanks.append(tank)
+        }
+        leviathan = setup.leviathanHome.map { home in
+            LeviathanFlight(home: home, center: home,
+                            pods: tanks.indices.filter { tanks[$0].kind == .pod }.map { ($0, tanks[$0].position - home) })
+        }
+        roundEarnings = Dictionary(uniqueKeysWithValues: players.map { ($0.id, RoundEarnings()) })
+        resetBattlefield()
+        currentIndex = 0
+        wind = randomWind()
+        phase = .aiming
+        sound.updateFlights([])
+        updateMusic()
+    }
+
+    /// Clears everything left over from the last round.
+    private func resetBattlefield() {
+        loop?.cancel()
+        loop = nil
+        computerTask?.cancel()
+        computerTask = nil
+        computerStatus = nil
+        islandDrift = nil
+        driveDirection = nil
+        projectiles = []
+        flames = []
+        tracers = [:]
+        explosions = []
+        particles = []
+        floatingTexts = []
+        turrets = []
+        beams = []
+        camera = nil
+        timeScale = 1
+        lastShot = nil
+        finalOutcome = nil
+        smolders = []
+        tankSmokeTimers = [:]
+        pendingWrecks = []
+        burnDamage = [:]
+        chargeStartedAt = nil
+        chargePower = nil
+        rumble.stop()
+        shake = 0
+        flash = 0
+    }
+
+    /// Points the barrel at a shot that should work and leaves its path on screen.
+    func showHint() {
+        guard canShowHint, let target = tanks.filter({ $0.isAlive && $0.side != 0 }).first else { return }
+        let ballistics = Ballistics(
+            terrain: terrain, wind: wind, gravity: gravity, speedPerPower: launchSpeed(forPower: 1),
+            origin: current.turretCenter, ownerID: current.id,
+            tanks: tanks.filter(\.isAlive).map { .init(id: $0.id, center: $0.turretCenter, radius: $0.radius) }
+        )
+        guard let aim = ballistics.bestAim(at: target.turretCenter, safeRadius: 30) else { return }
+        setAngle(aim.angle)
+        tracers[current.id] = ballistics.trajectory(angle: aim.angle, power: aim.power)
+        floatingTexts.append(FloatingText(position: current.turretCenter + Vec(0, 30), text: "Try \(Int(aim.power.rounded()))% power", color: .yellow))
+        mission?.hintShown = true
+        startLoop()
+    }
+
+    /// The path a shot would take from the current tank, for the aim guide.
+    func previewPath(power: Double) -> [Vec] {
+        Ballistics(terrain: terrain, wind: wind, gravity: gravity, speedPerPower: launchSpeed(forPower: 1),
+                   origin: current.turretCenter, ownerID: current.id,
+                   tanks: tanks.filter(\.isAlive).map { .init(id: $0.id, center: $0.turretCenter, radius: $0.radius) })
+            .trajectory(angle: current.angle, power: power)
+    }
+
+    private func finishMission(won: Bool) {
+        guard let run = mission else { return }
+        var stars = 0
+        if won {
+            stars = 1
+            if run.shots <= run.shotsUnderPar { stars += 1 }
+            if run.damageTaken <= 25 { stars += 1 }
+        }
+        TourProgress.shared.record(run.mission, stars: stars)
+        phase = .missionOver(won: won, stars: stars)
+        if won { sound.playFanfare() }
+        updateMusic()
+    }
+
+    /// Whose turn is skipped: dummies, and dead tanks.
+    private func takesTurns(_ index: Int) -> Bool {
+        tanks[index].isAlive && !(players.first { $0.id == tanks[index].id }?.isDummy ?? false)
+    }
+
+    /// When the Leviathan's firing pod is destroyed, another takes over.
+    private func promoteGunnerPod() {
+        guard let flight = leviathan, let difficulty = mission?.difficulty else { return }
+        let alivePods = flight.pods.map(\.index).filter { tanks[$0].isAlive }
+        guard !alivePods.contains(where: takesTurns), let next = alivePods.first,
+              let p = players.firstIndex(where: { $0.id == tanks[next].id }) else { return }
+        players[p].isDummy = false
+        players[p].computer = difficulty.enemyAim
+    }
+
     func thunder() {
         sound.thunder(atX: Double.random(in: 0...Game.worldSize.x))
         buzz(0.3)
@@ -343,7 +544,7 @@ final class Game {
         var tension: Double
         var level = 0.55
         switch phase {
-        case .roundOver, .matchOver: tension = 0.1
+        case .roundOver, .matchOver, .missionOver: tension = 0.1
         case .shopping: tension = 0.05
         case .killCam:
             tension = 0.95
@@ -369,6 +570,8 @@ final class Game {
     func startMatch(_ settings: MatchSettings) {
         self.settings = settings
         sound.volume = settings.volume
+        mission = nil
+        leviathan = nil
         players = [
             Player(id: 0, name: "Red", color: .red, money: settings.startingMoney),
             Player(id: 1, name: settings.computerOpponent == nil ? "Blue" : "CPU", color: .blue, money: settings.startingMoney,
@@ -437,12 +640,6 @@ final class Game {
         scheduleComputerTurn()
     }
 
-
-
-
-
-
-
     private func scheduleComputerTurn() {
         guard phase == .aiming, let difficulty = players.first(where: { $0.id == current.id })?.computer else { return }
         computerTask = Task { [weak self] in
@@ -459,6 +656,10 @@ final class Game {
     }
 
     private func endRound(winnerID: Int?) {
+        if mission != nil {
+            finishMission(won: winnerID == 0)
+            return
+        }
         for player in players {
             roundEarnings[player.id, default: RoundEarnings()].bonus += Economy.participation + (player.id == winnerID ? Economy.roundWin : 0)
         }
@@ -612,8 +813,11 @@ final class Game {
         if let count = tank.ammoCount(weapon) {
             guard count > 0 else { return }
             tank.inventory.ammo[weapon] = count - 1
-            if count == 1 { tank.selectedWeapon = .babyMissile }
+            if count == 1 {
+                tank.selectedWeapon = Weapon.arsenal.first { (tank.ammoCount($0) ?? 1) > 0 } ?? .babyMissile
+            }
         }
+        if mission != nil, tank.id == 0 { mission?.shots += 1 }
         tanks[currentIndex] = tank
 
         // Shots always fly over still terrain, so the kill cam can replay them exactly.
@@ -1095,6 +1299,7 @@ final class Game {
         if tanks[index].health < 0.5 { tanks[index].health = 0 }
 
         let victimID = tanks[index].id
+        if mission != nil, victimID == 0 { mission?.damageTaken += applied }
         if let attackerID, attackerID != victimID {
             roundEarnings[attackerID, default: RoundEarnings()].damage += Int((applied * Double(Economy.perDamagePoint)).rounded())
             tanks[index].lastAttackerID = attackerID
@@ -1347,9 +1552,20 @@ final class Game {
             if !startKillCam() { endRound(winnerID: alive.first?.side) }
             return
         }
+        if var run = mission {
+            if current.side != 0 { run.enemyTurns += 1 }
+            mission = run
+            if case let .survive(turns) = run.mission.objective, run.enemyTurns >= turns {
+                return finishMission(won: true)
+            }
+            if case .trickShot = run.mission.objective, !tanks[0].inventory.hasAmmo, projectiles.isEmpty {
+                return finishMission(won: false)
+            }
+            promoteGunnerPod()
+        }
         repeat {
             currentIndex = (currentIndex + 1) % tanks.count
-        } while !tanks[currentIndex].isAlive
+        } while !takesTurns(currentIndex)
         wind = randomWind()
         if tanks[currentIndex].shieldRegen > 0 {
             tanks[currentIndex].shield = min(tanks[currentIndex].shield + tanks[currentIndex].shieldRegen, tanks[currentIndex].shieldCap)
@@ -1365,8 +1581,14 @@ final class Game {
 
     private func startIslandDrift() {
         let moving = terrain.islands.filter { $0.sway != .zero }
-        guard !moving.isEmpty else { return }
+        guard !moving.isEmpty || leviathan != nil else { return }
         var drift = IslandDrift()
+        if var flight = leviathan {
+            flight.phase += 0.9
+            drift.creatureFrom = flight.center
+            drift.creatureTo = Leviathan.center(home: flight.home, phase: flight.phase)
+            leviathan = flight
+        }
         for island in moving {
             let phase = island.phase + 0.8
             terrain.setIslandPhase(id: island.id, phase)
@@ -1396,11 +1618,19 @@ final class Game {
                 tanks[index].position += delta
             }
         }
+        if let from = drift.creatureFrom, let to = drift.creatureTo, var flight = leviathan {
+            flight.center = from + (to - from) * eased
+            for pod in flight.pods where tanks.indices.contains(pod.index) {
+                tanks[pod.index].position = flight.center + pod.offset
+            }
+            leviathan = flight
+        }
         islandDrift = drift.elapsed >= Game.islandDriftDuration ? nil : drift
     }
 
     private func randomWind() -> Double {
-        maxWind > 0 ? Double.random(in: -maxWind...maxWind).rounded() : 0
+        if let range = mission?.windRange { return Double.random(in: range).rounded() }
+        return maxWind > 0 ? Double.random(in: -maxWind...maxWind).rounded() : 0
     }
 }
 

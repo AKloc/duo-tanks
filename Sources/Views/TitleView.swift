@@ -3,6 +3,7 @@ import SwiftUI
 /// Match setup. Choices are remembered between launches.
 struct TitleView: View {
     let onStart: (MatchSettings) -> Void
+    let onTour: () -> Void
 
     @AppStorage("rounds") private var rounds = 5
     @AppStorage("startingMoney") private var startingMoney = 15_000
@@ -23,6 +24,20 @@ struct TitleView: View {
         ScrollView {
             VStack(spacing: 22) {
                 header
+                Button(action: onTour) {
+                    VStack(spacing: 2) {
+                        PlateLabel(title: "The Tour", systemImage: "globe.americas.fill", size: .large)
+                        Text("Campaign · two worlds, two bosses")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.75))
+                    }
+                    .frame(maxWidth: 320)
+                    .padding(.vertical, 4)
+                }
+                .buttonStyle(.plate(.teal, .primary, size: .large))
+                Text("OR SET UP A QUICK MATCH")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
                 worldPicker
                 section("Opponent") {
                     Picker("Opponent", selection: $versusComputer) {

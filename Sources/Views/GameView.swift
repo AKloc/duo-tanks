@@ -3,8 +3,10 @@ import SwiftUI
 struct GameView: View {
     let game: Game
     let onQuit: () -> Void
+    var onPlayMission: (Mission, TourDifficulty) -> Void = { _, _ in }
 
     @State private var hinge: HingeState?
+    @State private var showsBriefing = false
     @State private var isFaceUp = false
     @State private var director = DirectorCamera()
     @State private var handoffPlayerID: Int?
@@ -16,10 +18,10 @@ struct GameView: View {
     private var isLaptopPosture: Bool { hinge?.isPartiallyOpen ?? false }
     private var isFolded: Bool { hinge?.status == .closed }
     private var isTabletop: Bool {
-        layout == .tabletop || (layout == .auto && hinge?.status == .fullyOpen && isFaceUp)
+        game.mission == nil && (layout == .tabletop || (layout == .auto && hinge?.status == .fullyOpen && isFaceUp))
     }
     private var usesHandoff: Bool {
-        handoffEnabled && !isTabletop && game.players.allSatisfy { !$0.isComputer }
+        handoffEnabled && !isTabletop && game.mission == nil && game.players.allSatisfy { !$0.isComputer }
     }
 
     /// Changes whenever the phone should change hands: a new turn or a new shopper.
@@ -40,7 +42,8 @@ struct GameView: View {
                     .transition(.move(edge: .bottom))
             } else {
                 VStack(spacing: 0) {
-                    BattlefieldView(game: game, director: isLaptopPosture ? director : nil)
+                    // Short screens always show enough sky for high shots and flying bosses.
+                    BattlefieldView(game: game, director: isLaptopPosture ? director : nil, fitHeight: 330)
                         .frame(maxHeight: .infinity)
                         .ignoresSafeArea(edges: .horizontal)
                     if isLaptopPosture, game.phase == .firing {
@@ -48,13 +51,31 @@ struct GameView: View {
                             .frame(maxHeight: .infinity)
                             .transition(.opacity)
                     } else {
-                        ControlPanel(game: game, hinge: hinge, onQuit: onQuit)
+                        ControlPanel(game: game, hinge: hinge, onQuit: onQuit, onPlayMission: onPlayMission)
                             .frame(maxHeight: isLaptopPosture ? .infinity : nil)
                             .fixedSize(horizontal: false, vertical: !isLaptopPosture)
                     }
                 }
                 .ignoresSafeArea(edges: isLaptopPosture ? .vertical : [])
             }
+        }
+        .overlay(alignment: .top) {
+            if let run = game.mission, game.phase == .aiming || game.phase == .firing {
+                MissionHUD(run: run, showsBriefing: showsBriefing, canShowHint: game.canShowHint, onHint: game.showHint)
+                    .padding(.top, 34)
+                    .allowsHitTesting(game.canShowHint)
+            }
+        }
+        .onChange(of: game.mission?.mission.id, initial: true) { _, id in
+            guard id != nil else { return }
+            showsBriefing = true
+            Task {
+                try? await Task.sleep(for: .seconds(4))
+                withAnimation { showsBriefing = false }
+            }
+        }
+        .onChange(of: game.mission?.shots) { _, shots in
+            if (shots ?? 0) > 0 { withAnimation { showsBriefing = false } }
         }
         .overlay {
             if let id = handoffPlayerID, usesHandoff, let player = game.players.first(where: { $0.id == id }) {
