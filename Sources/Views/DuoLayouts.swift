@@ -175,13 +175,9 @@ struct HandoffCover: View {
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 380)
                     Button(action: onStart) {
-                        Text("I'm \(player.name), let's go")
-                            .font(.headline)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 10)
+                        PlateLabel(title: "I'm \(player.name), let's go", systemImage: "hand.raised.fill", size: .large)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(player.color)
+                    .buttonStyle(.plate(player.color, .primary, size: .large))
                     .padding(.top, 6)
                 }
             }

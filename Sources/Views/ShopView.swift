@@ -22,9 +22,10 @@ struct ShopView: View {
                     .font(.system(.title, design: .rounded).bold().monospacedDigit())
                     .contentTransition(.numericText())
                     .animation(.snappy, value: player.money)
-                Button(playerIndex + 1 < game.players.count ? "Done" : "Start round", systemImage: "checkmark", action: game.finishShopping)
-                    .buttonStyle(.borderedProminent)
-                    .tint(player.color)
+                Button(action: game.finishShopping) {
+                    PlateLabel(title: playerIndex + 1 < game.players.count ? "Done" : "Start round", systemImage: "checkmark")
+                }
+                .buttonStyle(.plate(player.color, .primary))
                     .padding(.leading, 12)
             }
             .padding(20)
@@ -75,10 +76,12 @@ struct ShopItemCard: View {
             Spacer(minLength: 4)
             Button(action: onBuy) {
                 Text(item.price, format: .currency(code: "USD").precision(.fractionLength(0)))
-                    .font(.subheadline.bold().monospacedDigit())
-                    .frame(minWidth: 70)
+                    .font(.system(size: 12, weight: .heavy).width(.condensed).monospacedDigit())
+                    .lineLimit(1)
+                    .fixedSize()
+                    .frame(minWidth: 64)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plate(.green, size: .small))
             .disabled(!canAfford)
             .sensoryFeedback(.success, trigger: owned)
         }

@@ -21,8 +21,8 @@ struct ControlPanel: View {
                     Label("Kill cam", systemImage: "video.fill")
                         .font(.title2.bold())
                         .foregroundStyle(.red)
-                    Button("Skip", systemImage: "forward.fill", action: game.skipKillCam)
-                        .buttonStyle(.bordered)
+                    Button(action: game.skipKillCam) { PlateLabel(title: "Skip", systemImage: "forward.fill") }
+                        .buttonStyle(.plate(.red))
                 }
             default:
                 controls(for: game.current)
@@ -75,10 +75,7 @@ struct ControlPanel: View {
                 }
 
                 HStack(spacing: 12) {
-                    Stepper(value: Binding(get: { tank.angle }, set: game.setAngle), in: 0...180) {
-                        Text("Angle \(Int(tank.angle))°").monospacedDigit().lineLimit(1)
-                    }
-                    .frame(maxWidth: 200)
+                    AngleControl(angle: tank.angle, tint: tank.color, onChange: game.setAngle)
                     Spacer(minLength: 0)
                     weaponMenu(for: tank)
                     gearMenu(for: tank)
@@ -126,9 +123,12 @@ struct ControlPanel: View {
                 }
             }
         } label: {
-            Label(tank.selectedWeapon.name, systemImage: ShopItem.weapon(tank.selectedWeapon).systemImage).lineLimit(1)
+            PlateSurface(tint: tank.color, prominence: .secondary) {
+                PlateLabel(title: tank.selectedWeapon.name, systemImage: ShopItem.weapon(tank.selectedWeapon).systemImage)
+            }
         }
-        .buttonStyle(.bordered)
+        .menuStyle(.button)
+        .buttonStyle(.plain)
     }
 
     private func gearMenu(for tank: Tank) -> some View {
@@ -140,15 +140,18 @@ struct ControlPanel: View {
                 .disabled(gear.repairKits == 0 || tank.health >= 100)
             Label("Parachutes: \(gear.parachutes)", systemImage: ShopItem.parachute.systemImage)
         } label: {
-            Label("Gear", systemImage: "shippingbox")
-                .labelStyle(.iconOnly)
-                .overlay(alignment: .topTrailing) {
-                    if gear.shields + gear.repairKits + gear.parachutes > 0 {
-                        Circle().fill(.orange).frame(width: 7, height: 7).offset(x: 5, y: -4)
+            PlateSurface(tint: tank.color, prominence: .secondary) {
+                Image(systemName: "shippingbox.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .overlay(alignment: .topTrailing) {
+                        if gear.shields + gear.repairKits + gear.parachutes > 0 {
+                            Circle().fill(.orange).frame(width: 7, height: 7).offset(x: 6, y: -5)
+                        }
                     }
-                }
+            }
         }
-        .buttonStyle(.bordered)
+        .menuStyle(.button)
+        .buttonStyle(.plain)
         .accessibilityLabel("Gear")
     }
 }
@@ -190,14 +193,12 @@ struct HoldButton: View {
     @State private var isPressed = false
 
     var body: some View {
-        Image(systemName: symbol)
-            .font(.title3)
-            .frame(width: 40, height: 36)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(isPressed ? 0.6 : 0.15)))
-            .scaleEffect(isPressed ? 0.94 : 1)
-            .opacity(isEnabled ? 1 : 0.4)
-            .gesture(DragGesture(minimumDistance: 0)
+        PlateSurface(tint: .gray, prominence: .secondary, size: .small, isPressed: isPressed) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .bold))
+                .frame(width: 18)
+        }
+        .gesture(DragGesture(minimumDistance: 0)
                 .onChanged { _ in
                     guard !isPressed else { return }
                     isPressed = true
@@ -207,6 +208,38 @@ struct HoldButton: View {
                     isPressed = false
                     onRelease()
                 })
+    }
+}
+
+/// The barrel angle with step plates either side.
+struct AngleControl: View {
+    let angle: Double
+    let tint: Color
+    let onChange: (Double) -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button { onChange(angle - 1) } label: { Image(systemName: "minus").font(.system(size: 13, weight: .heavy)).frame(width: 14) }
+                .buttonStyle(.plate(tint, size: .small))
+                .buttonRepeatBehavior(.enabled)
+                .accessibilityLabel("Lower barrel")
+            VStack(spacing: 0) {
+                Text("ANGLE")
+                    .font(.system(size: 9, weight: .heavy).width(.expanded))
+                    .tracking(1)
+                    .foregroundStyle(.secondary)
+                Text("\(Int(angle))°")
+                    .font(.system(size: 20, weight: .heavy, design: .rounded).monospacedDigit())
+                    .contentTransition(.numericText())
+            }
+            .frame(minWidth: 52)
+            Button { onChange(angle + 1) } label: { Image(systemName: "plus").font(.system(size: 13, weight: .heavy)).frame(width: 14) }
+                .buttonStyle(.plate(tint, size: .small))
+                .buttonRepeatBehavior(.enabled)
+                .accessibilityLabel("Raise barrel")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityValue("\(Int(angle)) degrees")
     }
 }
 
@@ -250,8 +283,11 @@ struct RoundResults: View {
                     }
                 }
             }
-            Button(game.round >= game.settings.rounds ? "Final results" : "To the shop", systemImage: "cart", action: game.continueAfterRound)
-                .buttonStyle(.borderedProminent)
+            Button(action: game.continueAfterRound) {
+                PlateLabel(title: game.round >= game.settings.rounds ? "Final results" : "To the shop",
+                           systemImage: game.round >= game.settings.rounds ? "trophy.fill" : "cart.fill")
+            }
+            .buttonStyle(.plate(winner?.color ?? .orange, .primary))
         }
     }
 }
@@ -278,10 +314,10 @@ struct MatchResults: View {
                 .frame(maxWidth: 420)
             }
             HStack {
-                Button("Rematch", systemImage: "arrow.clockwise", action: game.newMatch)
-                    .buttonStyle(.borderedProminent)
-                Button("Main Menu", systemImage: "house", action: onQuit)
-                    .buttonStyle(.bordered)
+                Button(action: game.newMatch) { PlateLabel(title: "Rematch", systemImage: "arrow.clockwise") }
+                    .buttonStyle(.plate(standings.first?.color ?? .orange, .primary))
+                Button(action: onQuit) { PlateLabel(title: "Main Menu", systemImage: "house.fill") }
+                    .buttonStyle(.plate())
             }
         }
     }

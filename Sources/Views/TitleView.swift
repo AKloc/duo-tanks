@@ -77,13 +77,10 @@ struct TitleView: View {
                     Toggle("Haptics", isOn: $hapticsEnabled)
                 }
                 Button(action: start) {
-                    Label("Start Match", systemImage: "flame.fill")
-                        .font(.title3.bold())
-                        .frame(maxWidth: 320, minHeight: 54)
+                    PlateLabel(title: "Start Match", systemImage: "flame.fill", size: .large)
+                        .frame(maxWidth: 320)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.orange)
-                .buttonBorderShape(.capsule)
+                .buttonStyle(.plate(.orange, .primary, size: .large))
                 .padding(.bottom, 24)
             }
             .padding(.horizontal, 24)

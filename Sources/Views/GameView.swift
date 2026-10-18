@@ -9,6 +9,7 @@ struct GameView: View {
     @State private var director = DirectorCamera()
     @State private var handoffPlayerID: Int?
     @State private var handoffSawFold = false
+    @State private var handoffShownAt = Date.distantPast
     @AppStorage("layout") private var layout = LayoutSetting.auto
     @AppStorage("handoff") private var handoffEnabled = true
 
@@ -65,12 +66,14 @@ struct GameView: View {
         .background(Color(red: 0.05, green: 0.06, blue: 0.2).ignoresSafeArea())
         .background(HingeReader { hinge = $0 })
         .onChange(of: turnToken, initial: true) { _, _ in requestHandoff() }
-        .onChange(of: hinge) { _, newValue in
+        .onChange(of: hinge) { oldValue, newValue in
             if handoffPlayerID != nil {
-                // Folding hands the phone over; opening it again starts the turn.
-                if newValue?.status == .closed {
+                // Folding hands the phone over; opening it again starts the turn. Only a real fold from
+                // open counts, and hinge reports right as the cover appears (or the screen loads) are ignored.
+                guard Date.now.timeIntervalSince(handoffShownAt) > 1 else { return }
+                if newValue?.status == .closed, let oldValue, oldValue.status != .closed {
                     handoffSawFold = true
-                } else if handoffSawFold {
+                } else if handoffSawFold, newValue?.status != .closed {
                     dismissHandoff()
                 }
                 return
@@ -97,6 +100,7 @@ struct GameView: View {
         default: break
         }
         handoffSawFold = false
+        handoffShownAt = .now
     }
 
     private func dismissHandoff() {
