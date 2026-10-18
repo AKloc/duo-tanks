@@ -1,7 +1,7 @@
 import Foundation
 
 enum WorldTheme: String, CaseIterable, Identifiable {
-    case hills, desert, snow, moon
+    case hills, desert, snow, moon, aerie
 
     var id: Self { self }
 
@@ -11,16 +11,30 @@ enum WorldTheme: String, CaseIterable, Identifiable {
         case .desert: "Desert Dusk"
         case .snow: "Snowy Night"
         case .moon: "The Moon"
+        case .aerie: "Floating Isles"
         }
     }
 
-    var gravityScale: Double { self == .moon ? 0.4 : 1 }
-    /// No air on the Moon, so no wind.
-    var windScale: Double { self == .moon ? 0 : 1 }
+    var gravityScale: Double {
+        switch self {
+        case .moon: 0.4
+        case .aerie: 0.5
+        default: 1
+        }
+    }
+
+    /// No air on the Moon, so no wind; the isles get a gentle breeze.
+    var windScale: Double {
+        switch self {
+        case .moon: 0
+        case .aerie: 0.6
+        default: 1
+        }
+    }
 }
 
 enum WorldChoice: String, CaseIterable, Identifiable {
-    case random, hills, desert, snow, moon
+    case random, hills, desert, snow, moon, aerie
 
     var id: Self { self }
 

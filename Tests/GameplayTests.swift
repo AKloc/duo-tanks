@@ -18,9 +18,9 @@ struct GameplayTests {
     /// Finds a whole-degree angle and power that lands on the other tank, the way a careful player would.
     private func aimAtOpponent(in game: Game) throws -> (angle: Double, power: Double) {
         let ballistics = Ballistics(
-            heights: game.terrain.heights, wind: game.wind, gravity: game.gravity,
+            terrain: game.terrain, wind: game.wind, gravity: game.gravity,
             speedPerPower: game.launchSpeed(forPower: 1), origin: game.tanks[0].turretCenter, ownerID: 0,
-            tanks: game.tanks.map { .init(id: $0.id, center: $0.turretCenter) }
+            tanks: game.tanks.map { .init(id: $0.id, center: $0.turretCenter, radius: $0.radius) }
         )
         let target = game.tanks[1].turretCenter
         let rough = try #require(ballistics.bestAim(at: target))
@@ -36,7 +36,7 @@ struct GameplayTests {
     @Test func theComputersPredictionMatchesTheRealShot() throws {
         let game = makeGame(wind: 14)
         let ballistics = Ballistics(
-            heights: game.terrain.heights, wind: game.wind, gravity: game.gravity,
+            terrain: game.terrain, wind: game.wind, gravity: game.gravity,
             speedPerPower: game.launchSpeed(forPower: 1), origin: game.tanks[0].turretCenter, ownerID: 0, tanks: []
         )
         let predicted = try #require(ballistics.impact(angle: 40, power: 45))

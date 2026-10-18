@@ -148,6 +148,7 @@ struct BattlefieldView: View {
         case let .moon(tint): drawMoon(at: mapper.screen(Vec(820, 330)), radius: 20 * mapper.scale, tint: tint, in: &context)
         case .sun: drawSun(at: mapper.screen(Vec(240, 235)), radius: 40 * mapper.scale, in: &context)
         case .earth: drawEarth(at: mapper.screen(Vec(790, 315)), radius: 30 * mapper.scale, time: time, in: &context)
+        case .ringedPlanet: drawRingedPlanet(at: mapper.screen(Vec(760, 300)), radius: 52 * mapper.scale, in: &context)
         }
 
         let isOvercast = weather.precipitation == .rain || weather.hasLightning
@@ -194,6 +195,10 @@ struct BattlefieldView: View {
                     startPoint: mapper.screen(Vec(0, ridge.base + ridge.amplitude)), endPoint: mapper.screen(Vec(0, ridge.base * 0.5))
                 ))
             }
+        }
+
+        if look.hasFloatingBackdrop {
+            drawFloatingBackdrop(in: &context, mapper: mapper, time: time)
         }
 
         if look.hasBirds {
@@ -454,6 +459,18 @@ struct BattlefieldView: View {
     // MARK: Ground
 
     private func drawTerrain(_ terrain: Terrain, look: ThemeLook, soil: Image?, in context: inout GraphicsContext, mapper: WorldMapper, time: Double, wind: Double) {
+        drawUpdrafts(terrain.updrafts, in: &context, mapper: mapper, time: time)
+        if terrain.hasAbyss {
+            drawCloudSea(in: &context, mapper: mapper, time: time)
+        } else {
+            drawGround(terrain, look: look, soil: soil, in: &context, mapper: mapper, time: time, wind: wind)
+        }
+        for island in terrain.islands {
+            drawIsland(island, look: look, soil: soil, in: &context, mapper: mapper, time: time, wind: wind)
+        }
+    }
+
+    private func drawGround(_ terrain: Terrain, look: ThemeLook, soil: Image?, in context: inout GraphicsContext, mapper: WorldMapper, time: Double, wind: Double) {
         let s = mapper.scale
         let heights = terrain.heights
         let last = terrain.width - 1
@@ -537,6 +554,167 @@ struct BattlefieldView: View {
         }
     }
 
+    // MARK: Floating isles
+
+    private func drawIsland(_ island: Island, look: ThemeLook, soil: Image?, in context: inout GraphicsContext, mapper: WorldMapper, time: Double, wind: Double) {
+        let s = mapper.scale
+        let columns = Array(stride(from: 0, to: island.width, by: 2)) + [island.width - 1]
+        let solid = columns.filter { island.tops[$0] > island.bottoms[$0] }
+        guard let first = solid.first else { return }
+
+        // Outline: along the top left to right, back along the underside, splitting into pieces wherever rock is missing.
+        var shape = Path()
+        var piece: [Int] = []
+        func closePiece() {
+            guard piece.count > 1 else { piece = []; return }
+            shape.move(to: mapper.screen(island.offset + Vec(Double(piece[0]), island.tops[piece[0]])))
+            for c in piece.dropFirst() { shape.addLine(to: mapper.screen(island.offset + Vec(Double(c), island.tops[c]))) }
+            for c in piece.reversed() { shape.addLine(to: mapper.screen(island.offset + Vec(Double(c), island.bottoms[c]))) }
+            shape.closeSubpath()
+            piece = []
+        }
+        for c in columns {
+            if island.tops[c] > island.bottoms[c] { piece.append(c) } else { closePiece() }
+        }
+        closePiece()
+
+        var rock = context
+        rock.clip(to: shape)
+        let drift = island.offset - island.home
+        let worldRect = CGRect(origin: mapper.screen(Vec(drift.x, Game.worldSize.y + drift.y)),
+                               size: CGSize(width: Game.worldSize.x * s, height: Game.worldSize.y * s))
+        rock.fill(shape, with: .color(Color(red: 0.36, green: 0.28, blue: 0.26)))
+        if let soil { rock.draw(soil, in: worldRect) }
+        let topY = island.offset.y + (island.tops.max() ?? 0), bottomY = island.offset.y + (island.bottoms.min() ?? 0)
+        rock.fill(shape, with: .linearGradient(Gradient(colors: [.clear, Color(red: 0.12, green: 0.06, blue: 0.2).opacity(0.85)]),
+                                               startPoint: mapper.screen(Vec(0, topY - 6)), endPoint: mapper.screen(Vec(0, bottomY))))
+
+        // Vines and glowing pods hanging from the underside.
+        var vines = Path()
+        var glow = context
+        glow.blendMode = .plusLighter
+        for c in stride(from: first + 4, to: island.width - 4, by: 7) where island.tops[c] > island.bottoms[c] && hash(c + island.id * 97, 70) > 0.3 {
+            let root = island.offset + Vec(Double(c), island.bottoms[c] + 1)
+            let length = 8 + 26 * hash(c + island.id * 97, 71)
+            let sway = sin(time * 1.3 + Double(c) * 0.4) * 2.5
+            let tip = root + Vec(sway, -length)
+            vines.move(to: mapper.screen(root))
+            vines.addQuadCurve(to: mapper.screen(tip), control: mapper.screen(root + Vec(-sway, -length * 0.5)))
+            if hash(c + island.id * 97, 72) > 0.55 {
+                let p = mapper.screen(tip)
+                let r = (2.2 + sin(time * 2 + Double(c)) * 0.5) * s
+                glow.fill(Path(ellipseIn: CGRect(x: p.x - r * 3, y: p.y - r * 3, width: r * 6, height: r * 6)),
+                          with: .radialGradient(Gradient(colors: [Color(red: 0.4, green: 1, blue: 0.9).opacity(0.7), .clear]), center: p, startRadius: 0, endRadius: r * 3))
+            }
+        }
+        context.stroke(vines, with: .color(Color(red: 0.2, green: 0.45, blue: 0.35).opacity(0.85)), style: StrokeStyle(lineWidth: 1.1 * s, lineCap: .round))
+
+        // Grassy rim and blades along the top.
+        var rim = Path(), bare = Path()
+        var blades = Path()
+        let lean = wind / Game.windReference
+        for c in solid.dropLast() {
+            let next = min(c + 2, island.width - 1)
+            guard island.tops[next] > island.bottoms[next] else { continue }
+            let a = island.offset + Vec(Double(c), island.tops[c]), b = island.offset + Vec(Double(next), island.tops[next])
+            if island.grass[c] < 0.3 {
+                bare.move(to: mapper.screen(a))
+                bare.addLine(to: mapper.screen(b))
+                continue
+            }
+            rim.move(to: mapper.screen(a))
+            rim.addLine(to: mapper.screen(b))
+            guard hash(c + island.id * 31, 21) < island.grass[c] else { continue }
+            let length = 2.5 + 4 * hash(c + island.id * 31, 30)
+            let bend = lean * 0.9 + sin(time * 2.2 + a.x * 0.07) * 0.35
+            blades.move(to: mapper.screen(a))
+            blades.addQuadCurve(to: mapper.screen(a + Vec(bend * length * 0.45, length)), control: mapper.screen(a + Vec(bend * length * 0.1, length * 0.6)))
+        }
+        context.stroke(bare, with: .color(Color(red: 0.16, green: 0.12, blue: 0.1)), style: StrokeStyle(lineWidth: 2.2 * s, lineCap: .round))
+        context.stroke(rim, with: .color(Color(red: 0.35, green: 0.72, blue: 0.42)), style: StrokeStyle(lineWidth: 2.6 * s, lineCap: .round))
+        context.stroke(blades, with: .color(Color(red: 0.42, green: 0.82, blue: 0.5)), style: StrokeStyle(lineWidth: max(0.6, 0.9 * s), lineCap: .round))
+    }
+
+    private func drawCloudSea(in context: inout GraphicsContext, mapper: WorldMapper, time: Double) {
+        let span = mapper.visibleX
+        let surface = mapper.screen(Vec(0, 34)).y
+        let bottom = mapper.screen(Vec(0, -400)).y
+        context.fill(Path(CGRect(x: 0, y: surface, width: mapper.viewWidth, height: bottom - surface)), with: .linearGradient(
+            Gradient(colors: [Color(red: 0.96, green: 0.86, blue: 0.94), Color(red: 0.72, green: 0.62, blue: 0.86)]),
+            startPoint: CGPoint(x: 0, y: surface), endPoint: CGPoint(x: 0, y: surface + 60 * mapper.scale)))
+        for layer in 0..<2 {
+            for i in 0..<16 {
+                let speed = layer == 0 ? 5.0 : 9.0
+                let wrapped = (hash(i, 80 + layer) * 1_200 + time * speed).truncatingRemainder(dividingBy: 1_200) - 100
+                let x = span.lowerBound + wrapped / 1_200 * (span.upperBound - span.lowerBound + 200)
+                let y = 26 + hash(i, 82 + layer) * 18 - Double(layer) * 10
+                let r = 26 + hash(i, 84 + layer) * 30
+                let center = mapper.screen(Vec(x, y))
+                let radius = r * mapper.scale
+                context.fill(Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius * 0.55, width: radius * 2, height: radius * 1.1)),
+                             with: .radialGradient(Gradient(colors: [Color.white.opacity(layer == 0 ? 0.8 : 0.95), Color.white.opacity(0)]),
+                                                   center: center, startRadius: 0, endRadius: radius))
+            }
+        }
+    }
+
+    private func drawUpdrafts(_ updrafts: [Updraft], in context: inout GraphicsContext, mapper: WorldMapper, time: Double) {
+        for draft in updrafts {
+            let left = mapper.screen(Vec(draft.x.lowerBound, 0)), right = mapper.screen(Vec(draft.x.upperBound, 0))
+            let top = mapper.screen(Vec(0, Game.worldSize.y * 1.2)).y
+            let column = CGRect(x: left.x, y: top, width: right.x - left.x, height: left.y - top)
+            context.fill(Path(column), with: .linearGradient(Gradient(colors: [.clear, Color(red: 0.7, green: 0.95, blue: 1).opacity(0.12), .clear]),
+                                                            startPoint: CGPoint(x: column.minX, y: 0), endPoint: CGPoint(x: column.maxX, y: 0)))
+            var streaks = Path()
+            for k in 0..<14 {
+                let x = draft.x.lowerBound + hash(k, 90) * (draft.x.upperBound - draft.x.lowerBound)
+                let y = (time * 70 + hash(k, 91) * 420).truncatingRemainder(dividingBy: 420)
+                streaks.move(to: mapper.screen(Vec(x, y)))
+                streaks.addLine(to: mapper.screen(Vec(x, y + 14)))
+            }
+            context.stroke(streaks, with: .color(.white.opacity(0.35)), style: StrokeStyle(lineWidth: max(1, mapper.scale), lineCap: .round))
+        }
+    }
+
+    private func drawFloatingBackdrop(in context: inout GraphicsContext, mapper: WorldMapper, time: Double) {
+        for i in 0..<6 {
+            let x = hash(i, 100) * Game.worldSize.x
+            let y = 210 + hash(i, 101) * 140 + sin(time * 0.4 + Double(i)) * 3
+            let w = 26 + hash(i, 102) * 50
+            var shape = Path()
+            shape.move(to: mapper.screen(Vec(x - w / 2, y)))
+            shape.addQuadCurve(to: mapper.screen(Vec(x + w / 2, y)), control: mapper.screen(Vec(x, y + 6)))
+            shape.addQuadCurve(to: mapper.screen(Vec(x - w / 2, y)), control: mapper.screen(Vec(x, y - w * 0.9)))
+            context.fill(shape, with: .color(Color(red: 0.32, green: 0.38, blue: 0.56).opacity(0.55)))
+        }
+    }
+
+    private func drawRingedPlanet(at center: CGPoint, radius r: Double, in context: inout GraphicsContext) {
+        let tilt = Angle.degrees(-16)
+        var back = context
+        back.translateBy(x: center.x, y: center.y)
+        back.rotate(by: tilt)
+        let ring = CGRect(x: -r * 1.9, y: -r * 0.42, width: r * 3.8, height: r * 0.84)
+        back.stroke(Path(ellipseIn: ring), with: .color(Color(red: 0.95, green: 0.85, blue: 0.75).opacity(0.5)), lineWidth: r * 0.12)
+        context.fill(Path(ellipseIn: CGRect(x: center.x - r * 2, y: center.y - r * 2, width: r * 4, height: r * 4)),
+                     with: .radialGradient(Gradient(colors: [Color(red: 0.9, green: 0.7, blue: 0.8).opacity(0.25), .clear]), center: center, startRadius: r, endRadius: r * 2))
+        let disc = CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)
+        context.fill(Path(ellipseIn: disc), with: .linearGradient(
+            Gradient(colors: [Color(red: 0.98, green: 0.82, blue: 0.7), Color(red: 0.85, green: 0.55, blue: 0.62), Color(red: 0.45, green: 0.3, blue: 0.55)]),
+            startPoint: CGPoint(x: disc.minX, y: disc.minY), endPoint: CGPoint(x: disc.maxX, y: disc.maxY)))
+        var bands = context
+        bands.clip(to: Path(ellipseIn: disc))
+        for i in 0..<5 {
+            let y = disc.minY + r * (0.35 + Double(i) * 0.35)
+            bands.fill(Path(CGRect(x: disc.minX, y: y, width: disc.width, height: r * 0.09)), with: .color(.white.opacity(0.12)))
+        }
+        var front = context
+        front.translateBy(x: center.x, y: center.y)
+        front.rotate(by: tilt)
+        front.clip(to: Path(CGRect(x: -r * 2, y: 0, width: r * 4, height: r)))
+        front.stroke(Path(ellipseIn: ring), with: .color(Color(red: 0.98, green: 0.9, blue: 0.8).opacity(0.75)), lineWidth: r * 0.12)
+    }
+
     private func drawGrass(_ terrain: Terrain, in context: inout GraphicsContext, mapper: WorldMapper, time: Double, wind: Double) {
         let heights = terrain.heights
         var blades = Array(repeating: Path(), count: 3)
@@ -566,7 +744,8 @@ struct BattlefieldView: View {
     private func drawTank(_ tank: Tank, terrain: Terrain, isCurrent: Bool, in context: inout GraphicsContext, mapper: WorldMapper, time: Double) {
         let s = mapper.scale
         let ground = mapper.screen(tank.position)
-        let slope = atan((terrain.height(at: tank.position.x + 8) - terrain.height(at: tank.position.x - 8)) / 16)
+        let probe = tank.position.y + 4
+        let slope = tank.isAnchored ? 0 : atan((terrain.support(at: tank.position.x + 8, y: probe) - terrain.support(at: tank.position.x - 8, y: probe)) / 16)
         let lean = min(max(slope, -0.6), 0.6) + tank.tilt
         let base = CGPoint(x: ground.x, y: ground.y - tank.hop * s)
         let facing: Double = tank.angle <= 90 ? 1 : -1
@@ -688,7 +867,7 @@ struct BattlefieldView: View {
         context.stroke(Path(roundedRect: outline, cornerRadius: 5 * s), with: .color(tank.color.opacity(0.8)),
                        style: StrokeStyle(lineWidth: 1.2 * s, dash: [3 * s, 2 * s]))
         guard tank.isAlive else { return }
-        let surface = mapper.screen(Vec(tank.position.x, terrain.height(at: tank.position.x)))
+        let surface = mapper.screen(Vec(tank.position.x, terrain.support(at: tank.position.x, y: tank.position.y)))
         let bar = CGRect(x: surface.x - 14 * s, y: surface.y - 12 * s, width: 28 * s, height: 3.5 * s)
         context.fill(Path(roundedRect: bar, cornerRadius: 1.5 * s), with: .color(.black.opacity(0.55)))
         context.fill(Path(roundedRect: CGRect(x: bar.minX, y: bar.minY, width: bar.width * tank.health / 100, height: bar.height), cornerRadius: 1.5 * s),
@@ -767,7 +946,7 @@ struct BattlefieldView: View {
         var glow = context
         glow.blendMode = .plusLighter
         for flame in flames {
-            let base = mapper.screen(Vec(flame.x, terrain.height(at: flame.x) + 2))
+            let base = mapper.screen(Vec(flame.x, flame.y + 2))
             let flicker = 0.75 + 0.25 * sin(time * 17 + flame.x)
             let r = 14 * mapper.scale * flicker * min(1, flame.life)
             glow.fill(Path(ellipseIn: CGRect(x: base.x - r, y: base.y - r, width: r * 2, height: r * 2)), with: .radialGradient(

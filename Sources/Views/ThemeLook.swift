@@ -2,7 +2,7 @@ import SwiftUI
 
 /// How each world is painted.
 struct ThemeLook {
-    enum Celestial { case moon(tint: Color), sun, earth }
+    enum Celestial { case moon(tint: Color), sun, earth, ringedPlanet }
     enum Trees { case pines(snowy: Bool), cacti, none }
     enum Surface { case grass, snow, dust(rim: Color) }
     enum RidgeShape { case jagged, mesa, rounded }
@@ -17,6 +17,8 @@ struct ThemeLook {
     let surface: Surface
     let cloudColor: Color?
     let hasBirds: Bool
+    /// Distant islands hanging in the sky behind the battlefield.
+    var hasFloatingBackdrop = false
 
     static func `for`(_ theme: WorldTheme) -> ThemeLook {
         switch theme {
@@ -70,6 +72,24 @@ struct ThemeLook {
                 surface: .snow,
                 cloudColor: Color(red: 0.75, green: 0.82, blue: 0.95),
                 hasBirds: true
+            )
+        case .aerie:
+            ThemeLook(
+                sky: stops((0.02, 0.06, 0.15), (0.05, 0.22, 0.34), (0.28, 0.44, 0.6), (0.82, 0.62, 0.74)),
+                starBrightness: 0.6,
+                celestial: .ringedPlanet,
+                ridges: [
+                    (95, 45, Color(red: 0.62, green: 0.58, blue: 0.78)),
+                    (65, 40, Color(red: 0.74, green: 0.66, blue: 0.82)),
+                    (38, 30, Color(red: 0.86, green: 0.78, blue: 0.88)),
+                ],
+                ridgeShape: .rounded,
+                haze: Color(red: 0.6, green: 0.85, blue: 0.9),
+                trees: .none,
+                surface: .grass,
+                cloudColor: Color(red: 0.95, green: 0.88, blue: 0.95),
+                hasBirds: true,
+                hasFloatingBackdrop: true
             )
         case .moon:
             ThemeLook(

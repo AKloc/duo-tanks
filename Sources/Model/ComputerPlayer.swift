@@ -50,10 +50,11 @@ enum ComputerPlayer {
 
     static func takeTurn(in game: Game, difficulty: Difficulty) async {
         let me = game.current
-        guard let target = game.tanks.filter({ $0.isAlive && $0.id != me.id }).min(by: { abs($0.position.x - me.position.x) < abs($1.position.x - me.position.x) }) else { return }
+        guard let target = game.tanks.filter({ $0.isAlive && $0.side != me.side }).min(by: { abs($0.position.x - me.position.x) < abs($1.position.x - me.position.x) }) else { return }
 
         game.setComputerStatus("Thinking…")
         try? await Task.sleep(for: .seconds(Double.random(in: 0.7...1.3)))
+        while game.isTerrainMoving, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(50)) }
         guard !Task.isCancelled else { return }
 
         if me.health < 45, me.inventory.repairKits > 0 {
@@ -81,16 +82,16 @@ enum ComputerPlayer {
         game.select(weapon)
 
         let ballistics = Ballistics(
-            heights: game.terrain.heights,
+            terrain: game.terrain,
             wind: game.wind * difficulty.windJudgement,
             gravity: game.gravity,
             speedPerPower: game.launchSpeed(forPower: 1),
             origin: game.current.turretCenter,
             ownerID: me.id,
-            tanks: game.tanks.filter(\.isAlive).map { Ballistics.Target(id: $0.id, center: $0.turretCenter) }
+            tanks: game.tanks.filter(\.isAlive).map { Ballistics.Target(id: $0.id, center: $0.turretCenter, radius: $0.radius) }
         )
         let aimPoint = target.turretCenter
-        let safeRadius = weapon.blastRadius + Tank.hitRadius + 10
+        let safeRadius = weapon.blastRadius + me.radius + 10
         let aim = await Task.detached(priority: .userInitiated) { ballistics.bestAim(at: aimPoint, safeRadius: safeRadius) }.value
         guard !Task.isCancelled else { return }
 

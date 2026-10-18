@@ -4,7 +4,7 @@ import Testing
 struct BallisticsTests {
     private func ballistics(wind: Double = 0, targets: [Ballistics.Target] = []) -> Ballistics {
         Ballistics(
-            heights: Array(repeating: 100, count: 1000), wind: wind, gravity: Game.standardGravity,
+            terrain: Terrain(flatHeight: 100), wind: wind, gravity: Game.standardGravity,
             speedPerPower: Game.speedPerPower, origin: Vec(200, 107), ownerID: 0, tanks: targets
         )
     }
@@ -28,7 +28,7 @@ struct BallisticsTests {
     @Test func bestAimLandsOnTheTarget() throws {
         let target = Vec(640, 107)
         let aim = try #require(ballistics(wind: -18, targets: [.init(id: 1, center: target)]).bestAim(at: target))
-        #expect(aim.miss <= Tank.hitRadius, "the shell stops as soon as it reaches the tank")
+        #expect(aim.miss <= Tank.standardRadius, "the shell stops as soon as it reaches the tank")
         #expect(aim.angle < 90)
     }
 
@@ -40,7 +40,7 @@ struct BallisticsTests {
     }
 
     @Test func bestAimFacesTargetsOnTheLeft() throws {
-        let shooter = Ballistics(heights: Array(repeating: 100, count: 1000), wind: 0, gravity: Game.standardGravity,
+        let shooter = Ballistics(terrain: Terrain(flatHeight: 100), wind: 0, gravity: Game.standardGravity,
                                  speedPerPower: Game.speedPerPower, origin: Vec(800, 107), ownerID: 0, tanks: [])
         let aim = try #require(shooter.bestAim(at: Vec(400, 100)))
         #expect(aim.angle > 90)

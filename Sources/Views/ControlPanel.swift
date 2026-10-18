@@ -9,6 +9,7 @@ struct ControlPanel: View {
     @AppStorage("layout") private var layout = LayoutSetting.auto
     @AppStorage("handoff") private var handoffEnabled = true
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         Group {
@@ -39,9 +40,12 @@ struct ControlPanel: View {
     private func controls(for tank: Tank) -> some View {
         let isComputer = game.isComputerTurn
         let isCompact = verticalSizeClass == .compact && hinge?.isPartiallyOpen != true
+        let isNarrow = horizontalSizeClass == .compact && verticalSizeClass == .regular
         return Group {
             if isCompact {
                 compactControls(for: tank, isComputer: isComputer)
+            } else if isNarrow {
+                narrowControls(for: tank, isComputer: isComputer)
             } else {
                 regularControls(for: tank, isComputer: isComputer)
             }
@@ -87,6 +91,37 @@ struct ControlPanel: View {
             }
 
             fireButton(for: tank, size: 92)
+        }
+    }
+
+    /// Three stacked rows for narrow screens, like a folded phone held upright.
+    private func narrowControls(for tank: Tank, isComputer: Bool) -> some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Circle().fill(tank.color).frame(width: 10, height: 10)
+                Text(tank.name).font(.headline)
+                Text("R\(game.round)/\(game.settings.rounds)").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                moneyLabel(for: tank)
+                HealthLabel(health: tank.health, shield: tank.shield).font(.subheadline)
+                moreMenu
+            }
+            HStack(spacing: 8) {
+                AngleControl(angle: tank.angle, tint: tank.color, onChange: game.setAngle)
+                Spacer(minLength: 0)
+                weaponMenu(for: tank, size: .small)
+                gearMenu(for: tank)
+            }
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 0) {
+                    powerReadout(for: tank, font: .system(.title, design: .rounded).bold().monospacedDigit())
+                    statusText(for: tank, isComputer: isComputer, isCompact: true).lineLimit(1)
+                }
+                .fixedSize()
+                Spacer(minLength: 0)
+                DrivePad(fuel: tank.inventory.fuel, onStart: game.startDriving, onStop: game.stopDriving)
+                fireButton(for: tank, size: 72)
+            }
         }
     }
 

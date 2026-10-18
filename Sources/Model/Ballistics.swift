@@ -6,6 +6,7 @@ struct Ballistics: Sendable {
     struct Target: Sendable {
         let id: Int
         let center: Vec
+        var radius = Tank.standardRadius
     }
 
     struct Aim: Sendable {
@@ -15,7 +16,7 @@ struct Ballistics: Sendable {
         let miss: Double
     }
 
-    let heights: [Double]
+    let terrain: Terrain
     let wind: Double
     let gravity: Double
     /// World units per second of launch speed for each point of power.
@@ -23,12 +24,6 @@ struct Ballistics: Sendable {
     let origin: Vec
     let ownerID: Int
     let tanks: [Target]
-
-    func height(at x: Double) -> Double {
-        let i = Int(x.rounded())
-        guard heights.indices.contains(i) else { return 0 }
-        return heights[i]
-    }
 
     /// Where a shot with this angle and power stops: the ground, a tank, or `nil` if it leaves the world.
     func impact(angle: Double, power: Double) -> Vec? {
@@ -39,14 +34,14 @@ struct Ballistics: Sendable {
         let dt = 1.0 / 240
         var age = 0.0
         while age < 14 {
-            velocity += Vec(wind, -gravity) * dt
+            velocity += Vec(wind, terrain.updraft(at: position.x) - gravity) * dt
             position += velocity * dt
             age += dt
             guard position.x >= 0, position.x <= Game.worldSize.x else { return nil }
-            for tank in tanks where (tank.id != ownerID || age > 0.3) && (tank.center - position).length < Tank.hitRadius {
+            for tank in tanks where (tank.id != ownerID || age > 0.3) && (tank.center - position).length < tank.radius {
                 return position
             }
-            if position.y <= height(at: position.x) { return position }
+            if terrain.isSolid(position) { return position }
         }
         return nil
     }

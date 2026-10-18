@@ -14,9 +14,17 @@ extension Duration {
     }
 }
 
+enum TankKind: Equatable {
+    case standard
+    /// A boss bunker: big, armored, and bolted to the ground.
+    case bastion
+    /// A gun pod riding a boss through the air.
+    case pod
+}
+
 struct Tank: Identifiable {
     static let bodyHeight = 7.0
-    static let hitRadius = 12.0
+    static let standardRadius = 12.0
     static let barrelLength = 16.0
     static let maxShield = 60.0
     /// Dirt deeper than this over a tank counts as burying it.
@@ -45,10 +53,24 @@ struct Tank: Identifiable {
     var hasTurret = true
     /// How far the treads have turned, for animating them.
     var treadTravel = 0.0
+    var kind = TankKind.standard
+    var maxHealth = 100.0
+    var radius = Tank.standardRadius
+    /// Tanks on the same team don't count as enemies; `nil` means a team of one.
+    var team: Int?
+    /// Shield points restored at the start of each of this tank's turns.
+    var shieldRegen = 0.0
+    var shieldCap = Tank.maxShield
+
+    var side: Int { team ?? id }
+    /// Bosses don't fall, slide or get buried.
+    var isAnchored: Bool { kind != .standard }
+    var healthFraction: Double { health / maxHealth }
 
     /// How deep under the dirt this tank sits; 0 when it's on the surface.
     func buriedDepth(in terrain: Terrain) -> Double {
-        max(0, terrain.height(at: position.x) - position.y)
+        guard !isAnchored else { return 0 }
+        return max(0, terrain.support(at: position.x, y: position.y) - position.y)
     }
 
     func isBuried(in terrain: Terrain) -> Bool {
@@ -58,8 +80,15 @@ struct Tank: Identifiable {
     var isRocking: Bool { abs(tilt) > 0.002 || abs(tiltVelocity) > 0.01 || hop > 0.01 || hopVelocity > 0.01 }
 
     var isAlive: Bool { health > 0 }
-    var turretCenter: Vec { position + Vec(0, Tank.bodyHeight) }
-    var muzzle: Vec { turretCenter + barrelDirection * Tank.barrelLength }
+    var turretCenter: Vec {
+        switch kind {
+        case .standard: position + Vec(0, Tank.bodyHeight)
+        case .bastion: position + Vec(0, 18)
+        case .pod: position
+        }
+    }
+    var barrelLength: Double { kind == .bastion ? 26 : Tank.barrelLength }
+    var muzzle: Vec { turretCenter + barrelDirection * barrelLength }
     var barrelDirection: Vec {
         let radians = angle * .pi / 180
         return Vec(cos(radians), sin(radians))
@@ -110,6 +139,7 @@ struct Explosion: Identifiable {
 /// A crater that keeps trickling smoke for a while after the blast.
 struct Smolder {
     let x: Double
+    let y: Double
     let spread: Double
     let duration: Double
     var remaining: Double
@@ -127,10 +157,19 @@ struct Beam: Identifiable {
     var age = 0.0
 }
 
+/// Islands easing to their next positions between turns, carrying any tanks on them.
+private struct IslandDrift {
+    var from: [Int: Vec] = [:]
+    var to: [Int: Vec] = [:]
+    var riders: [Int: Int] = [:]
+    var elapsed = 0.0
+}
+
 /// Burning napalm fuel that runs downhill.
 struct Flame: Identifiable {
     let id = UUID()
     var x: Double
+    var y: Double
     var life: Double
     let ownerID: Int
     var emitTimer = 0.0
@@ -193,6 +232,10 @@ final class Game {
     nonisolated static let fallDamagePerUnit = 0.75
     /// At or below this health the music switches to its danger arrangement.
     nonisolated static let dangerHealth = 20.0
+    /// Health lost by falling into the clouds below the islands.
+    nonisolated static let abyssDamage = 50.0
+    /// How long islands take to drift into place between turns.
+    nonisolated static let islandDriftDuration = 1.4
     /// Power gained per second while the fire button is held.
     nonisolated static let chargeRate = 50.0
     /// The simulation always advances in steps this long, so a shot plays out the same way every time.
@@ -258,6 +301,7 @@ final class Game {
     @ObservationIgnored private var killCamImpactTime: Double?
     @ObservationIgnored private var killCamVictimID: Int?
     @ObservationIgnored private var driveTickDistance = 0.0
+    @ObservationIgnored private var islandDrift: IslandDrift?
 
     var current: Tank { tanks[currentIndex] }
 
@@ -305,13 +349,13 @@ final class Game {
             tension = 0.95
             level = 0.7
         case .aiming, .firing:
-            let lowest = tanks.filter(\.isAlive).map(\.health).min() ?? 100
-            tension = 0.15 + 0.45 * (1 - lowest / 100)
+            let lowest = tanks.filter(\.isAlive).map(\.healthFraction).min() ?? 1
+            tension = 0.15 + 0.45 * (1 - lowest)
             if round == settings.rounds { tension += 0.15 }
             if phase == .firing { tension += 0.15 }
             if chargePower != nil { tension += 0.1 }
         }
-        let isDanger = (phase == .aiming || phase == .firing) && tanks.contains { $0.isAlive && $0.health <= Game.dangerHealth }
+        let isDanger = (phase == .aiming || phase == .firing) && tanks.contains { $0.isAlive && $0.healthFraction * 100 <= Game.dangerHealth }
         sound.setMusic(tension: tension, enabled: settings.musicEnabled, level: level, danger: isDanger)
     }
 
@@ -352,11 +396,12 @@ final class Game {
         terrain = Terrain(width: Int(Game.worldSize.x), maxHeight: Game.worldSize.y, theme: theme, roughness: settings.roughness.scale)
         let lanes: [ClosedRange<Double>] = [70...300, 700...930]
         tanks = players.map { player in
-            let x = Double.random(in: lanes[player.id % lanes.count])
-            terrain.flatten(around: x, halfWidth: 14)
+            let spawn = terrain.spawnPoint(near: Double.random(in: lanes[player.id % lanes.count]))
+            terrain.flatten(around: spawn.x, halfWidth: 14, y: spawn.y)
+            let x = spawn.x
             return Tank(
                 id: player.id, name: player.name, color: player.color,
-                position: Vec(x, terrain.height(at: x)),
+                position: Vec(x, terrain.support(at: x, y: spawn.y + 1)),
                 angle: x < Game.worldSize.x / 2 ? 60 : 120,
                 inventory: player.inventory
             )
@@ -391,6 +436,7 @@ final class Game {
         updateMusic()
         scheduleComputerTurn()
     }
+
 
 
 
@@ -484,8 +530,8 @@ final class Game {
     }
 
     func useRepairKit() {
-        guard phase == .aiming, current.inventory.repairKits > 0, current.health < 100 else { return }
-        let healed = min(35, 100 - current.health)
+        guard phase == .aiming, current.inventory.repairKits > 0, current.health < current.maxHealth else { return }
+        let healed = min(35, current.maxHealth - current.health)
         tanks[currentIndex].inventory.repairKits -= 1
         tanks[currentIndex].health += healed
         floatingTexts.append(FloatingText(position: current.turretCenter + Vec(0, 26), text: "+\(Int(healed.rounded()))", color: .green))
@@ -509,7 +555,7 @@ final class Game {
         let step = min(Game.driveSpeed * dt, tank.inventory.fuel)
         guard step > 0 else { return stopDriving() }
         let nextX = min(max(tank.position.x + direction * step, 12), Game.worldSize.x - 12)
-        let ahead = terrain.height(at: nextX)
+        let ahead = terrain.support(at: nextX, y: tank.position.y + step * 1.5 + 1)
         if tank.isBuried(in: terrain) {
             stopDriving()
             floatingTexts.append(FloatingText(position: tank.turretCenter + Vec(0, 26), text: "Buried", color: .gray))
@@ -570,6 +616,8 @@ final class Game {
         }
         tanks[currentIndex] = tank
 
+        // Shots always fly over still terrain, so the kill cam can replay them exactly.
+        updateIslandDrift(0, snap: true)
         let seed = UInt64.random(in: 1...UInt64.max)
         lastShot = ShotSnapshot(terrain: terrain, tanks: tanks, wind: wind, shooterIndex: currentIndex, weapon: weapon,
                                 seed: seed, roundEarnings: roundEarnings, players: players)
@@ -614,12 +662,12 @@ final class Game {
         while travelled < 1_400, point.x >= 0, point.x <= Game.worldSize.x, point.y >= 0, point.y <= Game.worldSize.y * 2 {
             point += direction * 2
             travelled += 2
-            if Int(travelled) % 6 == 0, point.y <= terrain.height(at: point.x) + weapon.blastRadius {
+            if Int(travelled) % 6 == 0, terrain.isSolid(point) || terrain.isSolid(point - Vec(0, weapon.blastRadius)) {
                 terrain.carve(center: point, radius: weapon.blastRadius, leavesScorch: false)
                 terrain.burnGrass(around: point.x, radius: 3)
             }
             for i in tanks.indices where tanks[i].isAlive && tanks[i].id != tank.id && !struck.contains(tanks[i].id)
-                && (tanks[i].turretCenter - point).length < Tank.hitRadius {
+                && (tanks[i].turretCenter - point).length < tanks[i].radius {
                 struck.insert(tanks[i].id)
                 lastImpact = point
                 damage(tankAt: i, by: weapon.damage, attackerID: tank.id)
@@ -738,8 +786,9 @@ final class Game {
 
         updateKillCam(dt)
         if phase == .aiming {
+            updateIslandDrift(dt)
             drive(dt)
-            if driveDirection != nil || tanks.contains(where: { $0.fallDistance > 0 || $0.position.y > terrain.height(at: $0.position.x) + 0.5 }) {
+            if driveDirection != nil || tanks.contains(where: isUnsettled) {
                 settleTanks(dt)
                 blowUpWrecks()
                 // Driving off a cliff to your death ends your turn.
@@ -763,7 +812,7 @@ final class Game {
         updateMusic()
 
         // A falling tank counts until its landing (and any fall damage) has been processed.
-        let isSettling = tanks.contains { $0.fallDistance > 0 || $0.position.y > terrain.height(at: $0.position.x) + 0.5 }
+        let isSettling = tanks.contains(where: isUnsettled)
         let isSettled = projectiles.isEmpty && flames.isEmpty && explosions.isEmpty && !isSettling
         if phase == .firing, isSettled {
             endTurn()
@@ -772,9 +821,9 @@ final class Game {
             if killCamHold <= 0 { finishKillCam() }
         }
 
-        let isSmoking = !smolders.isEmpty || tanks.contains { $0.health < 50 }
+        let isSmoking = !smolders.isEmpty || tanks.contains { $0.healthFraction < 0.5 }
         let isMoving = tanks.contains(where: \.isRocking) || turrets.contains { !$0.isResting }
-        let isAnimating = isSmoking || isMoving || phase == .killCam || !beams.isEmpty || !particles.isEmpty || !floatingTexts.isEmpty || !explosions.isEmpty || shake > 0.01 || flash > 0.01
+        let isAnimating = isSmoking || isMoving || islandDrift != nil || phase == .killCam || !beams.isEmpty || !particles.isEmpty || !floatingTexts.isEmpty || !explosions.isEmpty || shake > 0.01 || flash > 0.01
         if !isAnimating && phase != .firing && chargeStartedAt == nil && driveDirection == nil {
             shake = 0
             flash = 0
@@ -801,7 +850,7 @@ final class Game {
     }
 
     private func fly(_ p: inout Projectile, _ dt: Double) -> [Projectile] {
-        p.velocity += Vec(wind, -gravity) * dt
+        p.velocity += Vec(wind, terrain.updraft(at: p.position.x) - gravity) * dt
         p.position += p.velocity * dt
         p.smokeTimer += dt
         if p.smokeTimer >= 0.035, p.weapon != .tracer {
@@ -825,19 +874,36 @@ final class Game {
 
         guard p.position.x >= 0, p.position.x <= Game.worldSize.x else { return [] }
 
-        let hit = tankHit(by: p, reach: Tank.hitRadius)
-        let ground = terrain.height(at: p.position.x)
-        guard hit != nil || p.position.y <= ground else { return [p] }
-        return impact(p, at: Vec(p.position.x, max(p.position.y, ground)), directHitID: hit)
+        let hit = tankHit(by: p, extraReach: 0)
+        guard hit != nil || terrain.isSolid(p.position) else { return [p] }
+        if hit == nil, terrain.isInAbyss(p.position) {
+            // Lost in the clouds below the islands.
+            particles += (0..<6).map { _ in
+                Particle(kind: .smoke, position: p.position + Vec(0, 4), velocity: Vec(Double.random(in: -8...8), Double.random(in: 4...12)),
+                         lifetime: 1.2, size: 5, color: Color(white: 0.95))
+            }
+            lastImpact = p.position
+            return []
+        }
+        // Land on the surface the shell came down on, but not on top of an island it hit from below.
+        let top = terrain.support(at: p.position.x, y: p.position.y)
+        let landing = top <= p.position.y + 4 ? max(p.position.y, top) : p.position.y
+        return impact(p, at: Vec(p.position.x, landing), directHitID: hit)
     }
 
     private func roll(_ p: inout Projectile, _ dt: Double) -> [Projectile] {
         guard let direction = p.rollDirection else { return [] }
         p.rollTime += dt
-        let here = terrain.height(at: p.position.x)
+        let here = terrain.support(at: p.position.x, y: p.position.y)
         let nextX = p.position.x + direction * 85 * dt
-        let ahead = terrain.height(at: nextX)
-        let hit = tankHit(by: p, reach: Tank.hitRadius + 2)
+        let ahead = terrain.support(at: nextX, y: p.position.y)
+        let hit = tankHit(by: p, extraReach: 2)
+        if hit == nil, here - ahead > 12 {
+            // Rolled off a ledge: fall the rest of the way.
+            p.rollDirection = nil
+            p.velocity = Vec(direction * 85, 0)
+            return [p]
+        }
         if hit != nil || nextX < 0 || nextX > Game.worldSize.x || ahead > here + 0.6 || p.rollTime > 5 {
             explode(p.weapon, at: Vec(p.position.x, here + 2), ownerID: p.ownerID, directHitID: hit)
             return []
@@ -861,7 +927,7 @@ final class Game {
             terrain.carve(center: p.position, radius: 7, leavesScorch: false)
             undermine(around: p.position.x, radius: 14, ownerID: p.ownerID)
         }
-        let hit = tankHit(by: p, reach: Tank.hitRadius + 4)
+        let hit = tankHit(by: p, extraReach: 4)
         if hit != nil || timeLeft <= 0 || p.position.x < 0 || p.position.x > Game.worldSize.x || p.position.y < 4 {
             explode(p.weapon, at: p.position, ownerID: p.ownerID, directHitID: hit)
             return []
@@ -869,9 +935,9 @@ final class Game {
         return [p]
     }
 
-    private func tankHit(by p: Projectile, reach: Double) -> Int? {
+    private func tankHit(by p: Projectile, extraReach: Double) -> Int? {
         tanks.first { tank in
-            tank.isAlive && (tank.id != p.ownerID || p.age > 0.3) && (tank.turretCenter - p.position).length < reach
+            tank.isAlive && (tank.id != p.ownerID || p.age > 0.3) && (tank.turretCenter - p.position).length < tank.radius + extraReach
         }?.id
     }
 
@@ -900,10 +966,10 @@ final class Game {
                 explode(weapon, at: center, ownerID: p.ownerID, directHitID: directHitID)
                 return []
             }
-            let left = terrain.height(at: center.x - 4), right = terrain.height(at: center.x + 4)
+            let left = terrain.support(at: center.x - 4, y: center.y + 2), right = terrain.support(at: center.x + 4, y: center.y + 2)
             var rolling = p
             rolling.rollDirection = left == right ? (p.velocity.x < 0 ? -1 : 1) : (left < right ? -1 : 1)
-            rolling.position = Vec(center.x, terrain.height(at: center.x) + 2.5)
+            rolling.position = Vec(center.x, terrain.support(at: center.x, y: center.y + 2) + 2.5)
             sound.dirt(atX: center.x)
             return [rolling]
 
@@ -923,9 +989,12 @@ final class Game {
             return [digger]
 
         case let .napalm(count, burnTime):
-            flames += (0..<count).map { i in
-                Flame(x: center.x + (Double(i) - Double(count - 1) / 2) * 4.5 + Double.random(in: -1.5...1.5, using: &rng),
-                      life: Double.random(in: burnTime, using: &rng), ownerID: p.ownerID)
+            flames += (0..<count).compactMap { i in
+                let x = center.x + (Double(i) - Double(count - 1) / 2) * 4.5 + Double.random(in: -1.5...1.5, using: &rng)
+                let life = Double.random(in: burnTime, using: &rng)
+                let y = terrain.support(at: x, y: center.y + 6)
+                guard !terrain.isInAbyss(Vec(x, y)) else { return nil }
+                return Flame(x: x, y: y, life: life, ownerID: p.ownerID)
             }
             explosions.append(Explosion(center: center, radius: 18, style: .fire))
             particles += ParticleFactory.explosion(at: center, radius: 14)
@@ -967,9 +1036,9 @@ final class Game {
         blastEffects(at: center, radius: radius, style: style)
         undermine(around: center.x, radius: radius * 1.5, ownerID: ownerID)
 
-        let reach = radius + Tank.hitRadius
-        rock(tanksNear: center, reach: reach * 2, strength: weapon.damage / 60 + radius / 40)
+        rock(tanksNear: center, reach: (radius + Tank.standardRadius) * 2, strength: weapon.damage / 60 + radius / 40)
         for i in tanks.indices where tanks[i].isAlive {
+            let reach = radius + tanks[i].radius
             let distance = tanks[i].id == directHitID ? 0 : (tanks[i].turretCenter - center).length
             guard distance < reach else { continue }
             let falloff = distance / reach
@@ -999,7 +1068,7 @@ final class Game {
         if radius >= 50 { flash = max(flash, min(1, radius / 100)) }
         guard style == .fire else { return }
         let smolderTime = 4 + radius / 25
-        smolders.append(Smolder(x: center.x, spread: radius * 0.4, duration: smolderTime, remaining: smolderTime))
+        smolders.append(Smolder(x: center.x, y: center.y, spread: radius * 0.4, duration: smolderTime, remaining: smolderTime))
     }
 
     /// Credits anyone who knocks the ground out from under a tank for its fall.
@@ -1062,9 +1131,13 @@ final class Game {
         }
     }
 
+    private func isUnsettled(_ tank: Tank) -> Bool {
+        !tank.isAnchored && (tank.fallDistance > 0 || tank.position.y > terrain.support(at: tank.position.x, y: tank.position.y) + 0.5)
+    }
+
     private func settleTanks(_ dt: Double) {
-        for i in tanks.indices {
-            let ground = terrain.height(at: tanks[i].position.x)
+        for i in tanks.indices where !tanks[i].isAnchored {
+            let ground = terrain.support(at: tanks[i].position.x, y: tanks[i].position.y)
             if tanks[i].position.y > ground + 0.5 {
                 if !tanks[i].isParachuting, tanks[i].isAlive, tanks[i].fallDistance > 10, tanks[i].inventory.parachutes > 0 {
                     tanks[i].isParachuting = true
@@ -1078,7 +1151,9 @@ final class Game {
                 // Dirt piled on top buries a tank rather than lifting it.
                 if tanks[i].position.y > ground - 0.5 { tanks[i].position.y = ground }
                 if tanks[i].fallDistance > 0 {
-                    if !tanks[i].isParachuting {
+                    if terrain.isInAbyss(tanks[i].position) {
+                        rescueFromAbyss(i)
+                    } else if !tanks[i].isParachuting {
                         damage(tankAt: i, by: max(0, tanks[i].fallDistance - Game.safeFallHeight) * Game.fallDamagePerUnit, attackerID: tanks[i].lastAttackerID, bypassesShield: true)
                     }
                     tanks[i].fallDistance = 0
@@ -1088,21 +1163,43 @@ final class Game {
         }
     }
 
+    /// Falling into the clouds costs a big chunk of health (none with a parachute); a salvage drone
+    /// then drops the tank back onto the nearest island.
+    private func rescueFromAbyss(_ i: Int) {
+        let fell = tanks[i].position
+        if !tanks[i].isParachuting {
+            damage(tankAt: i, by: Game.abyssDamage, attackerID: tanks[i].lastAttackerID, bypassesShield: true, showsText: false)
+            floatingTexts.append(FloatingText(position: fell + Vec(0, 30), text: "Into the abyss! -\(Int(Game.abyssDamage))", color: .white))
+        } else {
+            floatingTexts.append(FloatingText(position: fell + Vec(0, 30), text: "Rescued", color: .white))
+        }
+        let spawn = terrain.spawnPoint(near: fell.x)
+        tanks[i].position = spawn
+        tanks[i].fallDistance = 0
+        particles += (0..<10).map { _ in
+            Particle(kind: .smoke, position: fell + Vec(Double.random(in: -10...10), 4), velocity: Vec(Double.random(in: -10...10), Double.random(in: 6...16)),
+                     lifetime: 1.4, size: 6, color: Color(white: 0.95))
+        }
+    }
+
     private func updateFlames(_ dt: Double) {
         guard !flames.isEmpty || !burnDamage.isEmpty else { return }
         for i in flames.indices {
             flames[i].life -= dt
             let x = flames[i].x
-            let here = terrain.height(at: x)
-            let left = terrain.height(at: x - 2), right = terrain.height(at: x + 2)
+            let probe = flames[i].y + 2
+            let here = terrain.support(at: x, y: probe)
+            let left = terrain.support(at: x - 2, y: probe), right = terrain.support(at: x + 2, y: probe)
             if min(left, right) < here - 0.3 {
                 flames[i].x = min(max(x + (left < right ? -1 : 1) * 28 * dt, 0), Game.worldSize.x)
             }
+            flames[i].y = terrain.support(at: flames[i].x, y: probe)
+            if terrain.isInAbyss(Vec(flames[i].x, flames[i].y)) { flames[i].life = 0 }
             terrain.burnGrass(around: flames[i].x, radius: 5)
             flames[i].emitTimer += dt
             if flames[i].emitTimer >= 0.05 {
                 flames[i].emitTimer = 0
-                let base = Vec(flames[i].x + Double.random(in: -2...2), terrain.height(at: flames[i].x) + 1)
+                let base = Vec(flames[i].x + Double.random(in: -2...2), flames[i].y + 1)
                 particles.append(Particle(kind: .fire, position: base, velocity: Vec(wind * 0.2 + Double.random(in: -4...4), Double.random(in: 15...35)),
                                           lifetime: Double.random(in: 0.4...0.8), size: Double.random(in: 4...8), color: .orange))
                 if Double.random(in: 0...1) < 0.2 {
@@ -1114,7 +1211,7 @@ final class Game {
 
         for i in tanks.indices where tanks[i].isAlive {
             let tank = tanks[i]
-            let nearby = flames.filter { abs($0.x - tank.position.x) < 12 && tank.position.y - terrain.height(at: $0.x) < 10 }
+            let nearby = flames.filter { abs($0.x - tank.position.x) < 12 && abs(tank.position.y - $0.y) < 10 }
             guard let ownerID = nearby.first?.ownerID else { continue }
             let amount = (6 + 3 * Double(min(nearby.count, 6))) * dt
             let before = tanks[i].health
@@ -1163,7 +1260,7 @@ final class Game {
                 p.velocity.x += wind * 0.3 * dt
             }
             p.position += p.velocity * dt
-            if p.kind == .debris, p.position.y < terrain.height(at: p.position.x) { p.age = p.lifetime }
+            if p.kind == .debris, terrain.isSolid(p.position) { p.age = p.lifetime }
             particles[i] = p
         }
         particles.removeAll { $0.age >= $0.lifetime }
@@ -1192,7 +1289,7 @@ final class Game {
             turrets[i].velocity.y -= gravity * dt
             turrets[i].position += turrets[i].velocity * dt
             turrets[i].angle += turrets[i].spin * dt
-            let ground = terrain.height(at: turrets[i].position.x) + 2
+            let ground = terrain.support(at: turrets[i].position.x, y: turrets[i].position.y) + 2
             if turrets[i].position.y <= ground {
                 turrets[i].position.y = ground
                 turrets[i].velocity = Vec(turrets[i].velocity.x * 0.55, -turrets[i].velocity.y * 0.35)
@@ -1210,7 +1307,8 @@ final class Game {
             guard smolders[i].timer >= 0.08 / max(intensity, 0.15) else { continue }
             smolders[i].timer = 0
             let x = smolders[i].x + Double.random(in: -smolders[i].spread...smolders[i].spread)
-            let ground = Vec(x, terrain.height(at: x) + 1)
+            let ground = Vec(x, terrain.support(at: x, y: smolders[i].y + 6) + 1)
+            guard !terrain.isInAbyss(ground) else { continue }
             particles.append(Particle(
                 kind: .smoke,
                 position: ground,
@@ -1226,8 +1324,8 @@ final class Game {
         }
         smolders.removeAll { $0.remaining <= 0 }
 
-        for tank in tanks where tank.health < 50 {
-            let interval = !tank.isAlive ? 0.08 : tank.health < 25 ? 0.14 : 0.35
+        for tank in tanks where tank.healthFraction < 0.5 {
+            let interval = !tank.isAlive ? 0.08 : tank.healthFraction < 0.25 ? 0.14 : 0.35
             tankSmokeTimers[tank.id, default: 0] += dt
             guard tankSmokeTimers[tank.id, default: 0] >= interval else { continue }
             tankSmokeTimers[tank.id] = 0
@@ -1245,16 +1343,60 @@ final class Game {
     private func endTurn() {
         sound.updateFlights([])
         let alive = tanks.filter(\.isAlive)
-        if alive.count <= 1 {
-            if !startKillCam() { endRound(winnerID: alive.first?.id) }
+        if Set(alive.map(\.side)).count <= 1 {
+            if !startKillCam() { endRound(winnerID: alive.first?.side) }
             return
         }
         repeat {
             currentIndex = (currentIndex + 1) % tanks.count
         } while !tanks[currentIndex].isAlive
         wind = randomWind()
+        if tanks[currentIndex].shieldRegen > 0 {
+            tanks[currentIndex].shield = min(tanks[currentIndex].shield + tanks[currentIndex].shieldRegen, tanks[currentIndex].shieldCap)
+        }
+        startIslandDrift()
         phase = .aiming
         scheduleComputerTurn()
+    }
+
+    // MARK: Drifting islands
+
+    var isTerrainMoving: Bool { islandDrift != nil }
+
+    private func startIslandDrift() {
+        let moving = terrain.islands.filter { $0.sway != .zero }
+        guard !moving.isEmpty else { return }
+        var drift = IslandDrift()
+        for island in moving {
+            let phase = island.phase + 0.8
+            terrain.setIslandPhase(id: island.id, phase)
+            drift.from[island.id] = island.offset
+            drift.to[island.id] = island.position(atPhase: phase)
+        }
+        for i in tanks.indices where !tanks[i].isAnchored {
+            if let id = terrain.supportingIsland(at: tanks[i].position.x, y: tanks[i].position.y), drift.to[id] != nil {
+                drift.riders[i] = id
+            }
+        }
+        islandDrift = drift
+        startLoop()
+    }
+
+    private func updateIslandDrift(_ dt: Double, snap: Bool = false) {
+        guard var drift = islandDrift else { return }
+        drift.elapsed = snap ? Game.islandDriftDuration : min(drift.elapsed + dt, Game.islandDriftDuration)
+        let t = drift.elapsed / Game.islandDriftDuration
+        let eased = t * t * (3 - 2 * t)
+        for (id, start) in drift.from {
+            guard let end = drift.to[id], let island = terrain.islands.first(where: { $0.id == id }) else { continue }
+            let next = start + (end - start) * eased
+            let delta = next - island.offset
+            terrain.moveIsland(id: id, to: next)
+            for (index, rider) in drift.riders where rider == id && tanks.indices.contains(index) {
+                tanks[index].position += delta
+            }
+        }
+        islandDrift = drift.elapsed >= Game.islandDriftDuration ? nil : drift
     }
 
     private func randomWind() -> Double {
@@ -1272,7 +1414,7 @@ extension Game {
         computerTask = nil
         self.terrain = terrain
         for (i, x) in tankXs.enumerated() where tanks.indices.contains(i) {
-            tanks[i].position = Vec(x, terrain.height(at: x))
+            tanks[i].position = Vec(x, terrain.support(at: x, y: .infinity))
             tanks[i].health = 100
             tanks[i].shield = 0
             tanks[i].fallDistance = 0
@@ -1305,6 +1447,11 @@ extension Game {
 
     func give(_ item: ShopItem, quantity: Int, toTank index: Int) {
         tanks[index].inventory.add(item, quantity: quantity)
+    }
+
+    func place(tank index: Int, at position: Vec) {
+        tanks[index].position = position
+        phase = .firing
     }
 
     func lift(tank index: Int, by height: Double) {
