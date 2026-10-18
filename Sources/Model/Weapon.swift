@@ -59,16 +59,17 @@ enum Weapon: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Damage at the center of the blast or on a direct hit.
     var damage: Double {
         switch self {
-        case .babyMissile: 35
-        case .missile: 55
-        case .babyNuke: 85
-        case .nuke: 120
-        case .mirv, .mirvWarhead: 45
-        case .deathsHead, .deathsHeadWarhead: 60
-        case .funkyBomb: 45
-        case .funkyBomblet: 30
+        case .babyMissile: 60
+        case .missile: 80
+        case .babyNuke: 100
+        case .nuke: 150
+        case .mirv, .mirvWarhead: 50
+        case .deathsHead, .deathsHeadWarhead: 70
+        case .funkyBomb: 60
+        case .funkyBomblet: 40
         case .dirtClod: 0
         }
     }

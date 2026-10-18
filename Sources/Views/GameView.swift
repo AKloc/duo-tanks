@@ -14,6 +14,8 @@ struct GameView: View {
                 .frame(maxHeight: isLaptopPosture ? .infinity : nil)
                 .fixedSize(horizontal: false, vertical: !isLaptopPosture)
         }
+        .ignoresSafeArea(edges: isLaptopPosture ? .vertical : [])
+        .background(Color(red: 0.05, green: 0.06, blue: 0.2).ignoresSafeArea())
         .background(HingeReader { hinge = $0 })
         .onChange(of: hinge) { _, newValue in
             guard let newValue, newValue.isPartiallyOpen else { return }
