@@ -4,11 +4,11 @@ A classic turn-based artillery game for the iPhone Duo. Lob shells across destru
 
 ## Features
 
-- **The Tour:** a campaign across worlds with their own gravity. Terra and the floating islands of Aerie are playable now, with trick-shot missions, a boss per world, stars, and Easy/Normal/Hard modes with an aim guide and hints
+- **The Tour:** a campaign across five worlds, each with its own gravity and hazards: Terra, the floating islands of Aerie, the lava and vents of Cinder, the ice and gales of Glacia, and the black holes of the Rift. Thirty missions including trick shots and five bosses, with stars and Easy/Normal/Hard modes (aim guide, hints)
 - Two players on one phone, or against the computer (Easy, Normal, Hard)
-- Multi-round matches with a shop: 20 weapons including MIRVs, Nukes, Napalm, Rollers and Lasers, plus shields, parachutes, repair kits and fuel
+- Multi-round matches with a shop: 21 weapons including MIRVs, Nukes, Napalm, Rollers, Lasers and Black Holes, plus shields, parachutes, repair kits and fuel
 - Destructible terrain, wind, falling damage, burial and driving
-- Five worlds, including the low-gravity Moon and the Floating Isles over a bottomless cloud sea; weather, a kill cam and dynamic music
+- Six worlds for quick matches, including the Volcanic Forge, the low-gravity Moon and the Floating Isles; weather, a kill cam and dynamic music
 
 ## Built for the Duo
 

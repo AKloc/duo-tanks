@@ -146,6 +146,7 @@ enum ShopItem: Hashable, Identifiable {
             case .liquidDirt: 4_000
             case .plasmaBlast: 9_000
             case .laser: 10_000
+            case .blackHole: 9_000
             default: 0
             }
         case .parachute: 3_000
@@ -194,6 +195,7 @@ enum ShopItem: Hashable, Identifiable {
             case .liquidDirt: "Flows downhill and fills the valley it lands in."
             case .plasmaBlast: "A huge energy blast. No fire, no smoke."
             case .laser: "A straight beam. Ignores gravity and wind, burns through hills."
+            case .blackHole: "Opens a black hole that bends every shot for three turns."
             default: ""
             }
         case .parachute: "Opens automatically when you fall. No fall damage."
@@ -223,6 +225,7 @@ enum ShopItem: Hashable, Identifiable {
             case .liquidDirt: "drop.fill"
             case .plasmaBlast: "bolt.circle.fill"
             case .laser: "line.diagonal"
+            case .blackHole: "circle.dotted.circle"
             default: "scope"
             }
         case .parachute: "umbrella.fill"

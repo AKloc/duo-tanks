@@ -34,10 +34,11 @@ struct Ballistics: Sendable {
         let dt = 1.0 / 240
         var age = 0.0
         while age < 14 {
-            velocity += Vec(wind, terrain.updraft(at: position.x) - gravity) * dt
+            velocity += (Vec(wind, -gravity) + terrain.force(at: position)) * dt
             position += velocity * dt
             age += dt
             guard position.x >= 0, position.x <= Game.worldSize.x else { return nil }
+            if terrain.isSwallowed(position) { return position }
             for tank in tanks where (tank.id != ownerID || age > 0.3) && (tank.center - position).length < tank.radius {
                 return position
             }
@@ -57,10 +58,14 @@ struct Ballistics: Sendable {
         var age = 0.0
         var step = 0
         while age < 14 {
-            velocity += Vec(wind, terrain.updraft(at: position.x) - gravity) * dt
+            velocity += (Vec(wind, -gravity) + terrain.force(at: position)) * dt
             position += velocity * dt
             age += dt
             step += 1
+            if terrain.isSwallowed(position) {
+                points.append(position)
+                break
+            }
             guard position.x >= 0, position.x <= Game.worldSize.x else { break }
             if step % 7 == 0 { points.append(position) }
             if terrain.isSolid(position) || tanks.contains(where: { ($0.id != ownerID || age > 0.3) && ($0.center - position).length < $0.radius }) {

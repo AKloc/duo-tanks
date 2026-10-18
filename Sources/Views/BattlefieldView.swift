@@ -53,7 +53,7 @@ struct BattlefieldView: View {
                     let p = mapper.screen(e.center)
                     return Vec(p.x / proxy.size.width, p.y / proxy.size.height)
                 }
-                let _ = ambience.update(time: time, wind: wind, blasts: blasts, weather: weather, hasUFOs: theme == .moon, onStrike: isSecondary ? {} : game.thunder)
+                let _ = ambience.update(time: time, wind: wind, blasts: blasts, weather: weather, hasUFOs: theme == .moon && leviathan == nil, onStrike: isSecondary ? {} : game.thunder)
                 Canvas { context, size in
                     drawSky(look, weather: weather, in: &context, size: size, mapper: mapper, time: time)
                     // Buried tanks go behind the ground so the dirt covers them.
@@ -67,7 +67,7 @@ struct BattlefieldView: View {
                     drawTracers(tracers, tanks: tanks, in: &context, mapper: mapper)
                     drawFlames(flames, terrain: terrain, in: &context, mapper: mapper, time: time)
                     drawBeams(game.beams, in: &context, mapper: mapper)
-                    if let leviathan {
+                    if let leviathan, leviathan.pods.contains(where: { tanks.indices.contains($0.index) && tanks[$0.index].kind == .pod }) {
                         drawLeviathan(leviathan, tanks: tanks, in: &context, mapper: mapper, time: time)
                     }
                     for tank in tanks where !tank.isBuried(in: terrain) {
@@ -475,6 +475,96 @@ struct BattlefieldView: View {
         for island in terrain.islands {
             drawIsland(island, look: look, soil: soil, in: &context, mapper: mapper, time: time, wind: wind)
         }
+        drawLava(terrain, in: &context, mapper: mapper, time: time)
+        drawVents(terrain, in: &context, mapper: mapper, time: time)
+        for well in terrain.wells {
+            drawWell(well, in: &context, mapper: mapper, time: time)
+        }
+    }
+
+    // MARK: Hazards
+
+    private func drawLava(_ terrain: Terrain, in context: inout GraphicsContext, mapper: WorldMapper, time: Double) {
+        guard let level = terrain.lavaLevel else { return }
+        var pool = Path()
+        var surface = Path()
+        var x = 0
+        while x < terrain.width {
+            guard terrain.heights[x] < level else { x += 1; continue }
+            let start = x
+            while x < terrain.width, terrain.heights[x] < level { x += 1 }
+            let end = min(x, terrain.width - 1)
+            pool.move(to: mapper.screen(Vec(Double(start), level)))
+            for c in stride(from: start, through: end, by: 2) {
+                let wave = sin(time * 2 + Double(c) * 0.15) * 0.8
+                pool.addLine(to: mapper.screen(Vec(Double(c), level + wave)))
+            }
+            pool.addLine(to: mapper.screen(Vec(Double(end), terrain.heights[end])))
+            for c in stride(from: end, through: start, by: -2) { pool.addLine(to: mapper.screen(Vec(Double(c), terrain.heights[c]))) }
+            pool.closeSubpath()
+            surface.move(to: mapper.screen(Vec(Double(start), level)))
+            surface.addLine(to: mapper.screen(Vec(Double(end), level)))
+        }
+        context.fill(pool, with: .linearGradient(Gradient(colors: [Color(red: 1, green: 0.75, blue: 0.2), Color(red: 0.9, green: 0.25, blue: 0.05), Color(red: 0.4, green: 0.05, blue: 0.02)]),
+                                                 startPoint: mapper.screen(Vec(0, level)), endPoint: mapper.screen(Vec(0, level - 40))))
+        var glow = context
+        glow.blendMode = .plusLighter
+        glow.stroke(surface, with: .color(Color(red: 1, green: 0.6, blue: 0.2).opacity(0.6)), style: StrokeStyle(lineWidth: 6 * mapper.scale, lineCap: .round))
+        for i in 0..<10 {
+            let x = hash(i, 120) * Double(terrain.width)
+            guard terrain.height(at: x) < level - 3 else { continue }
+            let cycle = (time * 0.6 + hash(i, 121)).truncatingRemainder(dividingBy: 1)
+            let p = mapper.screen(Vec(x, level + cycle * 3))
+            let r = (1 + cycle * 3) * mapper.scale
+            glow.stroke(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
+                        with: .color(Color(red: 1, green: 0.85, blue: 0.4).opacity(1 - cycle)), lineWidth: max(0.8, mapper.scale))
+        }
+    }
+
+    private func drawVents(_ terrain: Terrain, in context: inout GraphicsContext, mapper: WorldMapper, time: Double) {
+        var glow = context
+        glow.blendMode = .plusLighter
+        for x in terrain.vents {
+            let mouth = mapper.screen(Vec(x, terrain.support(at: x, y: .infinity)))
+            let r = 9 * mapper.scale * (1 + 0.15 * sin(time * 3 + x))
+            glow.fill(Path(ellipseIn: CGRect(x: mouth.x - r * 1.6, y: mouth.y - r, width: r * 3.2, height: r * 2)),
+                      with: .radialGradient(Gradient(colors: [Color(red: 1, green: 0.7, blue: 0.2).opacity(0.85), .red.opacity(0.3), .clear]),
+                                            center: mouth, startRadius: 0, endRadius: r * 1.6))
+            var plume = Path()
+            for k in 0..<4 {
+                let rise = (time * 18 + Double(k) * 14).truncatingRemainder(dividingBy: 56)
+                let p = mapper.screen(Vec(x + sin(time + Double(k)) * 4, terrain.support(at: x, y: .infinity) + 4 + rise))
+                let pr = (3 + rise * 0.15) * mapper.scale
+                plume.addEllipse(in: CGRect(x: p.x - pr, y: p.y - pr, width: pr * 2, height: pr * 2))
+            }
+            context.fill(plume, with: .color(Color(white: 0.25).opacity(0.35)))
+        }
+    }
+
+    /// A black hole: a dark core inside a spinning, glowing accretion disk.
+    private func drawWell(_ well: GravityWell, in context: inout GraphicsContext, mapper: WorldMapper, time: Double) {
+        let s = mapper.scale
+        let center = mapper.screen(well.center)
+        let size = (12 + well.strength * 0.08) * s
+        var glow = context
+        glow.blendMode = .plusLighter
+        glow.fill(Path(ellipseIn: CGRect(x: center.x - size * 4, y: center.y - size * 4, width: size * 8, height: size * 8)),
+                  with: .radialGradient(Gradient(colors: [Color(red: 0.6, green: 0.3, blue: 1).opacity(0.35), .clear]), center: center, startRadius: size, endRadius: size * 4))
+        for ring in 0..<3 {
+            var disk = context
+            disk.blendMode = .plusLighter
+            disk.translateBy(x: center.x, y: center.y)
+            disk.rotate(by: .radians(time * (1.2 + Double(ring) * 0.5) * (ring % 2 == 0 ? 1 : -1)))
+            disk.scaleBy(x: 1, y: 0.42)
+            let r = size * (1.6 + Double(ring) * 0.55)
+            disk.stroke(Path(ellipseIn: CGRect(x: -r, y: -r, width: r * 2, height: r * 2)),
+                        with: .conicGradient(Gradient(colors: [Color(red: 1, green: 0.7, blue: 0.4).opacity(0.9), Color(red: 0.6, green: 0.3, blue: 1).opacity(0.2),
+                                                               Color(red: 1, green: 0.7, blue: 0.4).opacity(0.9)]), center: .zero),
+                        lineWidth: size * 0.35)
+        }
+        context.fill(Path(ellipseIn: CGRect(x: center.x - size, y: center.y - size, width: size * 2, height: size * 2)), with: .color(.black))
+        context.stroke(Path(ellipseIn: CGRect(x: center.x - size, y: center.y - size, width: size * 2, height: size * 2)),
+                       with: .color(Color(red: 1, green: 0.85, blue: 0.6).opacity(0.8)), lineWidth: 1.2 * s)
     }
 
     private func drawGround(_ terrain: Terrain, look: ThemeLook, soil: Image?, in context: inout GraphicsContext, mapper: WorldMapper, time: Double, wind: Double) {
@@ -536,7 +626,8 @@ struct BattlefieldView: View {
             let normal = Vec(-d.y, d.x) / d.length
             let lit = max(0, normal.x * BattlefieldView.moonlight.x + normal.y * BattlefieldView.moonlight.y)
             let level = min(4, Int(lit * 5))
-            if terrain.grass[x] < 0.3 {
+            let isGrassy = if case .grass = look.surface { true } else { false }
+            if isGrassy, !terrain.isIcy, terrain.grass[x] < 0.3 {
                 charred.move(to: mapper.screen(a))
                 charred.addLine(to: mapper.screen(b))
             } else {
@@ -556,7 +647,13 @@ struct BattlefieldView: View {
             context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: width * s, lineCap: .round))
         }
 
-        if case .grass = look.surface {
+        if terrain.isIcy {
+            var glaze = context
+            glaze.blendMode = .plusLighter
+            glaze.stroke(surface, with: .color(Color(red: 0.7, green: 0.9, blue: 1).opacity(0.55)), style: StrokeStyle(lineWidth: 3 * s, lineCap: .round, lineJoin: .round))
+            glaze.stroke(surface, with: .color(.white.opacity(0.8)), style: StrokeStyle(lineWidth: 1 * s, lineCap: .round, lineJoin: .round))
+        }
+        if case .grass = look.surface, !terrain.isIcy {
             drawGrass(terrain, in: &context, mapper: mapper, time: time, wind: wind)
         }
     }
@@ -752,6 +849,9 @@ struct BattlefieldView: View {
         switch tank.kind {
         case .bastion: return drawBastion(tank, isCurrent: isCurrent, in: &context, mapper: mapper, time: time)
         case .pod: return drawPod(tank, isCurrent: isCurrent, in: &context, mapper: mapper, time: time)
+        case .crawler: return drawCrawler(tank, isCurrent: isCurrent, in: &context, mapper: mapper, time: time)
+        case .icebreaker: return drawIcebreaker(tank, isCurrent: isCurrent, in: &context, mapper: mapper, time: time)
+        case .mothership: return drawMothership(tank, isCurrent: isCurrent, in: &context, mapper: mapper, time: time)
         case .standard: break
         }
         let s = mapper.scale
@@ -977,6 +1077,129 @@ struct BattlefieldView: View {
                   with: .radialGradient(Gradient(colors: [.white, tank.color, .clear]), center: center, startRadius: 0, endRadius: eye * 2))
         drawHealthBar(for: tank, at: CGPoint(x: center.x, y: center.y - 22 * s), width: 26, in: &context, scale: s)
         if isCurrent { drawTurnMarker(at: CGPoint(x: center.x, y: center.y - 26 * s), scale: s, in: &context) }
+    }
+
+    private func drawCrawler(_ tank: Tank, isCurrent: Bool, in context: inout GraphicsContext, mapper: WorldMapper, time: Double) {
+        let s = mapper.scale
+        let base = tank.position
+        let facing: Double = tank.angle <= 90 ? 1 : -1
+        let segments = (0..<5).map { i -> (Vec, Double) in
+            let t = Double(i)
+            let bob = sin(time * 3 - t * 0.9) * 2
+            return (base + Vec(-facing * (4 + t * 9), 4 + 18 * exp(-t * 0.5) * (i == 0 ? 0.75 : 0.55) + bob), 13 - t * 1.6)
+        }
+        let hot = tank.isAlive ? 1.0 : 0.15
+        for (center, radius) in segments.reversed() {
+            let p = mapper.screen(center)
+            let r = radius * s
+            context.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)), with: .radialGradient(
+                Gradient(colors: [Color(red: 0.9, green: 0.4 * hot, blue: 0.1 * hot), Color(red: 0.25, green: 0.08, blue: 0.06)]),
+                center: CGPoint(x: p.x, y: p.y - r * 0.4), startRadius: 0, endRadius: r * 1.3))
+            context.stroke(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)), with: .color(.black.opacity(0.5)), lineWidth: 1 * s)
+        }
+        let head = mapper.screen(tank.turretCenter)
+        if tank.isAlive {
+            var barrel = Path()
+            barrel.move(to: head)
+            barrel.addLine(to: mapper.screen(tank.muzzle))
+            context.stroke(barrel, with: .color(Color(red: 0.2, green: 0.08, blue: 0.05)), style: StrokeStyle(lineWidth: 5 * s, lineCap: .round))
+            var glow = context
+            glow.blendMode = .plusLighter
+            let eye = 3.2 * s
+            for dx in [-4.0, 4.0] {
+                let e = CGPoint(x: head.x + dx * s, y: head.y - 2 * s)
+                glow.fill(Path(ellipseIn: CGRect(x: e.x - eye, y: e.y - eye, width: eye * 2, height: eye * 2)), with: .color(Color(red: 1, green: 0.9, blue: 0.3)))
+            }
+            drawHealthBar(for: tank, at: CGPoint(x: head.x, y: head.y - 34 * s), width: 50, in: &context, scale: s)
+            if isCurrent { drawTurnMarker(at: CGPoint(x: head.x, y: head.y - 42 * s), scale: s, in: &context) }
+        }
+    }
+
+    private func drawIcebreaker(_ tank: Tank, isCurrent: Bool, in context: inout GraphicsContext, mapper: WorldMapper, time: Double) {
+        let s = mapper.scale
+        let base = mapper.screen(tank.position)
+        let facing: Double = tank.angle <= 90 ? 1 : -1
+        func p(_ dx: Double, _ dy: Double) -> CGPoint { CGPoint(x: base.x + dx * facing * s, y: base.y - dy * s) }
+        let steel = tank.isAlive ? Color(red: 0.55, green: 0.65, blue: 0.75) : Color(red: 0.28, green: 0.26, blue: 0.26)
+        context.fill(Path(ellipseIn: CGRect(x: base.x - 34 * s, y: base.y - 3 * s, width: 68 * s, height: 7 * s)), with: .color(.black.opacity(0.45)))
+        context.fill(Path(roundedRect: CGRect(x: base.x - 28 * s, y: base.y - 9 * s, width: 56 * s, height: 9 * s), cornerRadius: 4.5 * s), with: .color(Color(white: 0.12)))
+        var hull = Path()
+        hull.move(to: p(-26, 8))
+        hull.addLine(to: p(-22, 20))
+        hull.addLine(to: p(14, 20))
+        hull.addLine(to: p(22, 8))
+        hull.closeSubpath()
+        context.fill(hull, with: .linearGradient(Gradient(colors: [steel.mix(with: .white, by: 0.25), steel.mix(with: .black, by: 0.4)]), startPoint: p(0, 20), endPoint: p(0, 8)))
+        var plow = Path()
+        plow.move(to: p(22, 2))
+        plow.addLine(to: p(36, 0))
+        plow.addLine(to: p(30, 22))
+        plow.addLine(to: p(20, 20))
+        plow.closeSubpath()
+        context.fill(plow, with: .linearGradient(Gradient(colors: [Color(red: 0.95, green: 0.8, blue: 0.2), Color(red: 0.6, green: 0.45, blue: 0.1)]), startPoint: p(30, 22), endPoint: p(30, 0)))
+        var stripes = Path()
+        for k in 0..<3 {
+            stripes.move(to: p(23 + Double(k) * 4, 3))
+            stripes.addLine(to: p(27 + Double(k) * 4, 19))
+        }
+        context.stroke(stripes, with: .color(.black.opacity(0.6)), lineWidth: 1.5 * s)
+        let turret = mapper.screen(tank.turretCenter)
+        if tank.isAlive {
+            var barrel = Path()
+            barrel.move(to: turret)
+            barrel.addLine(to: mapper.screen(tank.muzzle))
+            context.stroke(barrel, with: .color(Color(white: 0.2)), style: StrokeStyle(lineWidth: 5 * s, lineCap: .butt))
+        }
+        context.fill(Path(roundedRect: CGRect(x: turret.x - 12 * s, y: turret.y - 8 * s, width: 24 * s, height: 14 * s), cornerRadius: 6 * s),
+                     with: .color(steel.mix(with: .black, by: 0.2)))
+        guard tank.isAlive else { return }
+        drawHealthBar(for: tank, at: CGPoint(x: base.x, y: turret.y - 30 * s), width: 50, in: &context, scale: s)
+        if isCurrent { drawTurnMarker(at: CGPoint(x: base.x, y: turret.y - 38 * s), scale: s, in: &context) }
+    }
+
+    private func drawMothership(_ tank: Tank, isCurrent: Bool, in context: inout GraphicsContext, mapper: WorldMapper, time: Double) {
+        let s = mapper.scale
+        let center = mapper.screen(tank.position)
+        let w = 90 * s
+        if let beam = game.tractorBeam, game.tanks.indices.contains(beam.targetIndex) {
+            let target = mapper.screen(game.tanks[beam.targetIndex].position)
+            let fade = sin(.pi * min(beam.age / TractorBeam.duration, 1))
+            var cone = Path()
+            cone.move(to: CGPoint(x: center.x - w * 0.12, y: center.y + w * 0.1))
+            cone.addLine(to: CGPoint(x: center.x + w * 0.12, y: center.y + w * 0.1))
+            cone.addLine(to: CGPoint(x: target.x + 22 * s, y: target.y + 4 * s))
+            cone.addLine(to: CGPoint(x: target.x - 22 * s, y: target.y + 4 * s))
+            cone.closeSubpath()
+            var glow = context
+            glow.blendMode = .plusLighter
+            glow.fill(cone, with: .linearGradient(Gradient(colors: [Color(red: 0.5, green: 1, blue: 0.6).opacity(0.6 * fade), Color(red: 0.5, green: 1, blue: 0.6).opacity(0.15 * fade)]),
+                                                  startPoint: center, endPoint: target))
+        }
+        if tank.isAlive {
+            var barrel = Path()
+            barrel.move(to: center)
+            barrel.addLine(to: mapper.screen(tank.muzzle))
+            context.stroke(barrel, with: .color(Color(white: 0.25)), style: StrokeStyle(lineWidth: 5 * s, lineCap: .butt))
+        }
+        let metal = tank.isAlive ? Color(white: 0.8) : Color(white: 0.3)
+        context.fill(Path(ellipseIn: CGRect(x: center.x - w * 0.22, y: center.y - w * 0.3, width: w * 0.44, height: w * 0.36)),
+                     with: .linearGradient(Gradient(colors: [Color(red: 0.6, green: 0.95, blue: 1).opacity(0.9), Color(red: 0.15, green: 0.45, blue: 0.6)]),
+                                           startPoint: CGPoint(x: center.x, y: center.y - w * 0.3), endPoint: CGPoint(x: center.x, y: center.y)))
+        context.fill(Path(ellipseIn: CGRect(x: center.x - w / 2, y: center.y - w * 0.09, width: w, height: w * 0.22)),
+                     with: .linearGradient(Gradient(colors: [metal, metal.mix(with: .black, by: 0.5)]),
+                                           startPoint: CGPoint(x: center.x, y: center.y - w * 0.09), endPoint: CGPoint(x: center.x, y: center.y + w * 0.13)))
+        guard tank.isAlive else { return }
+        var lights = context
+        lights.blendMode = .plusLighter
+        for i in 0..<9 {
+            let x = center.x + (Double(i) - 4) * w * 0.1
+            let lit = Int(time * 8 + Double(i)) % 3 == 0
+            let r = w * 0.022
+            lights.fill(Path(ellipseIn: CGRect(x: x - r, y: center.y + w * 0.02 - r, width: r * 2, height: r * 2)),
+                        with: .color((i % 2 == 0 ? Color.yellow : .cyan).opacity(lit ? 1 : 0.35)))
+        }
+        drawHealthBar(for: tank, at: CGPoint(x: center.x, y: center.y - w * 0.42), width: 70, in: &context, scale: s)
+        if isCurrent { drawTurnMarker(at: CGPoint(x: center.x, y: center.y - w * 0.48), scale: s, in: &context) }
     }
 
     private func drawTurnMarker(at tip: CGPoint, scale s: Double, in context: inout GraphicsContext) {

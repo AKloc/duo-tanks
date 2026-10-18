@@ -173,9 +173,189 @@ struct MissionSetup {
                 enemies: Leviathan.podOffsets.enumerated().map { pod($1, $0 == 1) },
                 leviathanHome: home
             )
+        case "cinder-1":
+            return MissionSetup(
+                terrain: ground(seed: 41) { x in 130 + 30 * sin(x / 150) },
+                wind: -5...5, playerX: 180, playerInventory: .starting,
+                enemies: [EnemySpec(name: "Gunner", color: .blue, x: 760, health: 70, aimCap: .easy)]
+            )
+        case "cinder-2":
+            var terrain = ground(seed: 42, noise: 5) { x in
+                switch x {
+                case ..<330: 150
+                case ..<400: 150 - (x - 330) / 70 * 120
+                case ..<650: 30
+                case ..<670: 30 + (x - 650) / 20 * 80
+                case ..<770: 110
+                default: 110 + min(90, (x - 770) * 1.2)
+                }
+            }
+            terrain.addHazards(lavaLevel: 85)
+            return MissionSetup(terrain: terrain, wind: -5...5, playerX: 180, playerInventory: .starting,
+                                enemies: [EnemySpec(name: "Gunner", color: .blue, x: 700, health: 90, aimCap: .normal)])
+        case "cinder-3":
+            var terrain = ground(seed: 43) { x in 120 + 40 * sin(x / 120) }
+            terrain.addHazards(vents: [430, 570])
+            return MissionSetup(terrain: terrain, wind: -8...8, playerX: 170, playerInventory: .starting,
+                                enemies: [EnemySpec(name: "Gunner", color: .blue, x: 830, health: 90, aimCap: .normal)])
+        case "cinder-4":
+            let terrain = ground(seed: 44, noise: 3) { x in
+                switch x {
+                case ..<280: 230
+                case ..<640: 230 - (x - 280) / 360 * 170
+                case ..<740: 60
+                case ..<780: 60 + (x - 740) / 40 * 230
+                default: 290
+                }
+            }
+            return MissionSetup(
+                terrain: terrain, wind: 0...0, playerX: 160,
+                playerInventory: Inventory(ammo: [.napalm: 2], fuel: 0, hasUnlimitedShells: false),
+                enemies: [EnemySpec(name: "Target", color: .orange, x: 700, health: 45, isDummy: true, fixedHealth: true)]
+            )
+        case "cinder-5":
+            var terrain = ground(seed: 45) { x in 110 + 60 * sin(x / 95) }
+            terrain.addHazards(lavaLevel: 75, vents: [500])
+            return MissionSetup(
+                terrain: terrain, wind: -10...10, playerX: 500,
+                playerInventory: Inventory(ammo: [.missile: 4], parachutes: 1, fuel: 30),
+                enemies: [
+                    EnemySpec(name: "West Gunner", color: .blue, x: 140, health: 90, aimCap: .normal),
+                    EnemySpec(name: "East Gunner", color: .purple, x: 860, health: 90, aimCap: .normal),
+                ]
+            )
+        case "cinder-boss":
+            var terrain = ground(seed: 46) { x in 120 + 45 * sin(x / 110 + 0.5) }
+            terrain.addHazards(lavaLevel: 85)
+            return MissionSetup(
+                terrain: terrain, wind: -8...8, playerX: 160,
+                playerInventory: Inventory(ammo: [.missile: 6, .babyNuke: 2, .mirv: 2], parachutes: 1, shields: 1, repairKits: 1, fuel: 30),
+                enemies: [EnemySpec(name: "Magma Crawler", color: .orange, x: 760, health: 320, kind: .crawler, radius: 22,
+                                    inventory: Inventory(ammo: [.missile: 30, .napalm: 6]))]
+            )
+        case "glacia-1":
+            var terrain = ground(seed: 51) { x in
+                x < 600 ? 140 + 20 * sin(x / 120) : 140 + (x - 600) * 0.45
+            }
+            terrain.addHazards(isIcy: true)
+            return MissionSetup(terrain: terrain, wind: -10...10, playerX: 180, playerInventory: .starting,
+                                enemies: [EnemySpec(name: "Gunner", color: .blue, x: 820, health: 80, aimCap: .easy)])
+        case "glacia-2":
+            var terrain = ground(seed: 52) { x in 130 + 35 * sin(x / 140) }
+            terrain.addHazards(isIcy: true, hasGusts: true)
+            return MissionSetup(terrain: terrain, wind: -40...40, playerX: 170, playerInventory: .starting,
+                                enemies: [EnemySpec(name: "Gunner", color: .blue, x: 800, health: 80, aimCap: .normal)])
+        case "glacia-3":
+            var terrain = ground(seed: 53, noise: 2) { x in
+                switch x {
+                case ..<300: 200
+                case ..<560: 200 + (x - 300) / 260 * 60
+                case ..<660: 260 - (x - 560) / 100 * 45
+                case ..<720: 30
+                default: 240
+                }
+            }
+            terrain.addHazards(isIcy: true)
+            return MissionSetup(
+                terrain: terrain, wind: 0...0, playerX: 160,
+                playerInventory: Inventory(ammo: [.missile: 2], fuel: 0, hasUnlimitedShells: false),
+                enemies: [EnemySpec(name: "Shielded Target", color: .orange, x: 610, health: 60, shield: 999, shieldCap: 999,
+                                    isDummy: true, fixedHealth: true)]
+            )
+        case "glacia-4":
+            var terrain = ground(seed: 54) { x in 120 + 90 * exp(-pow((x - 250) / 120, 2)) + 100 * exp(-pow((x - 780) / 110, 2)) }
+            terrain.addHazards(isIcy: true, hasGusts: true)
+            return MissionSetup(
+                terrain: terrain, wind: -25...25, weather: Weather(precipitation: .snow), playerX: 500,
+                playerInventory: Inventory(ammo: [.missile: 3], parachutes: 1, fuel: 30),
+                enemies: [
+                    EnemySpec(name: "West Gunner", color: .blue, x: 250, health: 70, aimCap: .normal),
+                    EnemySpec(name: "East Gunner", color: .purple, x: 780, health: 70, aimCap: .normal),
+                ]
+            )
+        case "glacia-5":
+            var terrain = ground(seed: 55) { x in 110 + 150 * exp(-pow((x - 150) / 110, 2)) + 150 * exp(-pow((x - 860) / 110, 2)) }
+            terrain.addHazards(isIcy: true)
+            return MissionSetup(
+                terrain: terrain, wind: -15...15, playerX: 500,
+                playerInventory: Inventory(ammo: [.missile: 3, .dirtClod: 3], parachutes: 1, fuel: 30),
+                enemies: [
+                    EnemySpec(name: "West Gunner", color: .blue, x: 140, health: 80),
+                    EnemySpec(name: "East Gunner", color: .purple, x: 860, health: 80),
+                ]
+            )
+        case "glacia-boss":
+            var terrain = ground(seed: 56) { x in 140 + 15 * sin(x / 160) }
+            terrain.addHazards(isIcy: true)
+            return MissionSetup(
+                terrain: terrain, wind: -12...12, playerX: 150,
+                playerInventory: Inventory(ammo: [.missile: 6, .babyNuke: 2, .dirtClod: 3], parachutes: 1, shields: 1, repairKits: 1, fuel: 60),
+                enemies: [EnemySpec(name: "The Icebreaker", color: Color(red: 0.55, green: 0.65, blue: 0.75), x: 830, health: 320, kind: .icebreaker,
+                                    radius: 20, inventory: Inventory(ammo: [.missile: 40]))]
+            )
+        case "rift-1":
+            return MissionSetup(
+                terrain: moonGround(seed: 61), wind: 0...0, playerX: 160, playerInventory: .starting,
+                enemies: [EnemySpec(name: "Gunner", color: .blue, x: 840, health: 70, aimCap: .easy)]
+            )
+        case "rift-2":
+            var terrain = moonGround(seed: 62)
+            terrain.addHazards(wells: [GravityWell(center: Vec(500, 220), strength: 160)])
+            return MissionSetup(terrain: terrain, wind: 0...0, playerX: 170, playerInventory: .starting,
+                                enemies: [EnemySpec(name: "Gunner", color: .blue, x: 820, health: 80, aimCap: .normal)])
+        case "rift-3":
+            var terrain = ground(seed: 63, noise: 3) { x in
+                switch x {
+                case ..<440: 110
+                case ..<500: 360
+                default: 90
+                }
+            }
+            terrain.addHazards(wells: [GravityWell(center: Vec(640, 300), strength: 150)])
+            return MissionSetup(
+                terrain: terrain, wind: 0...0, playerX: 170,
+                playerInventory: Inventory(ammo: [.missile: 3], fuel: 0, hasUnlimitedShells: false),
+                enemies: [EnemySpec(name: "Target", color: .orange, x: 600, health: 50, isDummy: true, fixedHealth: true)]
+            )
+        case "rift-4":
+            var terrain = moonGround(seed: 64)
+            terrain.addHazards(wells: [GravityWell(center: Vec(380, 250), strength: 130), GravityWell(center: Vec(640, 190), strength: 130)])
+            return MissionSetup(terrain: terrain, wind: 0...0, playerX: 160, playerInventory: .starting,
+                                enemies: [EnemySpec(name: "Gunner", color: .blue, x: 840, health: 90)])
+        case "rift-5":
+            var terrain = moonGround(seed: 65)
+            terrain.addHazards(wells: [GravityWell(center: Vec(500, 300), strength: 140)])
+            return MissionSetup(
+                terrain: terrain, wind: 0...0, playerX: 500,
+                playerInventory: Inventory(ammo: [.missile: 4, .blackHole: 1], parachutes: 1, fuel: 30),
+                enemies: [
+                    EnemySpec(name: "West Gunner", color: .blue, x: 130, health: 80),
+                    EnemySpec(name: "East Gunner", color: .purple, x: 870, health: 80),
+                ]
+            )
+        case "rift-boss":
+            let home = Vec(700, 280)
+            return MissionSetup(
+                terrain: moonGround(seed: 66), wind: 0...0, playerX: 170,
+                playerInventory: Inventory(ammo: [.missile: 6, .mirv: 2, .laser: 2, .blackHole: 1], parachutes: 2, shields: 1, repairKits: 1, fuel: 30),
+                enemies: [EnemySpec(name: "The Mothership", color: .green, x: home.x, health: 380, kind: .mothership, radius: 30,
+                                    inventory: Inventory(ammo: [.missile: 60]), position: home)],
+                leviathanHome: home
+            )
         default:
             return MissionSetup(terrain: Terrain(flatHeight: 100), wind: 0...0, playerX: 200, playerInventory: .starting, enemies: [gunner(800)])
         }
+    }
+
+    /// Gently rolling lunar ground pocked with craters.
+    private static func moonGround(seed: UInt64) -> Terrain {
+        var terrain = ground(seed: seed, noise: 6) { x in 120 + 25 * sin(x / 170 + Double(seed)) }
+        var generator = SeededRandom(seed: seed)
+        for _ in 0..<5 {
+            let x = Double.random(in: 280...720, using: &generator)
+            terrain.carve(center: Vec(x, terrain.height(at: x) + 6), radius: Double.random(in: 18...34, using: &generator), leavesScorch: false)
+        }
+        return terrain
     }
 
     /// Ground following `profile`, roughened with a little repeatable noise.

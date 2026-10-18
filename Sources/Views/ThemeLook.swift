@@ -91,6 +91,23 @@ struct ThemeLook {
                 hasBirds: true,
                 hasFloatingBackdrop: true
             )
+        case .forge:
+            ThemeLook(
+                sky: stops((0.05, 0.02, 0.03), (0.2, 0.05, 0.05), (0.5, 0.14, 0.07), (0.95, 0.42, 0.14)),
+                starBrightness: 0.3,
+                celestial: .sun,
+                ridges: [
+                    (180, 130, Color(red: 0.32, green: 0.12, blue: 0.1)),
+                    (120, 120, Color(red: 0.2, green: 0.08, blue: 0.07)),
+                    (70, 90, Color(red: 0.1, green: 0.05, blue: 0.05)),
+                ],
+                ridgeShape: .jagged,
+                haze: Color(red: 1, green: 0.4, blue: 0.15),
+                trees: .none,
+                surface: .dust(rim: Color(red: 0.95, green: 0.45, blue: 0.2)),
+                cloudColor: Color(red: 0.3, green: 0.22, blue: 0.22),
+                hasBirds: false
+            )
         case .moon:
             ThemeLook(
                 sky: stops((0, 0, 0.01), (0.01, 0.01, 0.03), (0.03, 0.03, 0.06), (0.06, 0.06, 0.09)),

@@ -23,19 +23,21 @@ enum WeaponBehavior {
     case tracer
     /// Clears dirt in front of the barrel without harming anyone.
     case riot
+    /// Leaves a temporary black hole above where it lands.
+    case singularity
 }
 
 enum Weapon: String, CaseIterable, Identifiable {
     case babyMissile, missile, babyNuke, nuke, mirv, deathsHead, funkyBomb
     case roller, sandhog, napalm, leapfrog, dirtClod, riotCharge, tracer
-    case heavyRoller, hotNapalm, tonOfDirt, liquidDirt, plasmaBlast, laser
+    case heavyRoller, hotNapalm, tonOfDirt, liquidDirt, plasmaBlast, laser, blackHole
     case mirvWarhead, deathsHeadWarhead, funkyBomblet
 
     var id: Self { self }
 
     /// Weapons a player can own and fire, in menu order.
     static let arsenal: [Weapon] = [
-        .babyMissile, .missile, .babyNuke, .nuke, .mirv, .deathsHead, .funkyBomb, .plasmaBlast, .laser,
+        .babyMissile, .missile, .babyNuke, .nuke, .mirv, .deathsHead, .funkyBomb, .plasmaBlast, .laser, .blackHole,
         .roller, .heavyRoller, .sandhog, .napalm, .hotNapalm, .leapfrog,
         .dirtClod, .tonOfDirt, .liquidDirt, .riotCharge, .tracer,
     ]
@@ -62,6 +64,7 @@ enum Weapon: String, CaseIterable, Identifiable {
         case .liquidDirt: "Mudflow"
         case .plasmaBlast: "Ion Blast"
         case .laser: "Laser"
+        case .blackHole: "Black Hole"
         case .mirvWarhead, .deathsHeadWarhead: "Warhead"
         case .funkyBomblet: "Bomblet"
         }
@@ -92,6 +95,7 @@ enum Weapon: String, CaseIterable, Identifiable {
         case .liquidDirt: 12
         case .plasmaBlast: 70
         case .laser: 4
+        case .blackHole: 12
         }
     }
 
@@ -112,6 +116,7 @@ enum Weapon: String, CaseIterable, Identifiable {
         case .heavyRoller: 100
         case .plasmaBlast: 90
         case .laser: 90
+        case .blackHole: 20
         case .napalm, .hotNapalm, .dirtClod, .tonOfDirt, .liquidDirt, .riotCharge, .tracer: 0
         }
     }
@@ -129,6 +134,7 @@ enum Weapon: String, CaseIterable, Identifiable {
         case .liquidDirt: .liquidDirt(volume: 2_800)
         case .plasmaBlast: .plasma
         case .laser: .laser
+        case .blackHole: .singularity
         case .leapfrog: .bounce(times: 2)
         case .tracer: .tracer
         case .riotCharge: .riot

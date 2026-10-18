@@ -108,13 +108,13 @@ enum Chapter: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .terra: .hills
         case .aerie: .aerie
-        case .cinder: .desert
+        case .cinder: .forge
         case .glacia: .snow
         case .rift: .moon
         }
     }
 
-    var isAvailable: Bool { self == .terra || self == .aerie }
+    var isAvailable: Bool { true }
     var missions: [Mission] { Mission.all.filter { $0.chapter == self } }
 }
 
@@ -196,6 +196,78 @@ struct Mission: Identifiable, Equatable {
                 briefing: "Something huge is circling the isles, with three gun pods on its back.",
                 tip: "Destroy all three pods. It moves every turn, so lead your shots, and only one pod fires at a time.",
                 objective: .destroyAll, par: 10, isBoss: true),
+        Mission(id: "cinder-1", chapter: .cinder, number: 1, title: "Heavy Metal",
+                briefing: "Gravity on Cinder is crushing. Everything you fire comes down hard and fast.",
+                tip: "Shells drop quickly here. Use more power and a steeper barrel than you would on Terra.",
+                objective: .destroyAll, par: 4),
+        Mission(id: "cinder-2", chapter: .cinder, number: 2, title: "The Lava Moat",
+                briefing: "The enemy is perched on a ledge above a lake of lava.",
+                tip: "Lava burns anything that falls in. Blast the ledge out from under them.",
+                objective: .destroyAll, par: 4),
+        Mission(id: "cinder-3", chapter: .cinder, number: 3, title: "Eruption",
+                briefing: "Two vents sit between you. Every third turn they blow.",
+                tip: "Eruptions build new ridges, so your aim may need to change after one. Stay clear of the vents.",
+                objective: .destroyAll, par: 5),
+        Mission(id: "cinder-4", chapter: .cinder, number: 4, title: "Firestarter",
+                briefing: "A target hides in a basin you can't hit directly. You have two Napalms.",
+                tip: "Napalm runs downhill. Land it on the slope above the basin and let it flow down.",
+                objective: .trickShot, par: 1),
+        Mission(id: "cinder-5", chapter: .cinder, number: 5, title: "Forge Gauntlet",
+                briefing: "Lava, vents and two gunners. Welcome to the forge.",
+                tip: "Knock a gunner into the lava and it will finish the job for you.",
+                objective: .destroyAll, par: 8),
+        Mission(id: "cinder-boss", chapter: .cinder, number: 6, title: "The Magma Crawler",
+                briefing: "Something enormous lives under the crust. It surfaces to fire, then burrows somewhere new.",
+                tip: "It moves after every shot it takes, so read its new position each turn. Big blasts dig it out fastest.",
+                objective: .destroyAll, par: 10, isBoss: true),
+        Mission(id: "glacia-1", chapter: .glacia, number: 1, title: "Black Ice",
+                briefing: "Everything here is coated in ice. Hit something and it slides.",
+                tip: "A near miss can send a tank sliding downhill, sometimes off a cliff. Aim for the uphill side.",
+                objective: .destroyAll, par: 4),
+        Mission(id: "glacia-2", chapter: .glacia, number: 2, title: "Gale Force",
+                briefing: "A storm is howling across the ice, and the wind shifts while your shell is in the air.",
+                tip: "Watch the clouds. Gusts change the wind mid-flight, so favor short, fast shots.",
+                objective: .destroyAll, par: 5),
+        Mission(id: "glacia-3", chapter: .glacia, number: 3, title: "Slip and Slide",
+                briefing: "A shielded target sits on an icy shelf above a crevasse. Blasts won't hurt it. The fall will.",
+                tip: "Hit the ice just uphill of it and the blast will push it over the edge.",
+                objective: .trickShot, par: 1),
+        Mission(id: "glacia-4", chapter: .glacia, number: 4, title: "Whiteout",
+                briefing: "Snow, gusts and two gunners on the ridges.",
+                tip: "Big blasts high on a slope set off avalanches that bury whoever is below.",
+                objective: .destroyAll, par: 7),
+        Mission(id: "glacia-5", chapter: .glacia, number: 5, title: "Glacier Hold",
+                briefing: "Hold your position for four enemy turns. Or end it sooner.",
+                tip: "Dirt Bombs make a quick wall. Your parachutes will save you from a slide off the edge.",
+                objective: .survive(turns: 4), par: 8),
+        Mission(id: "glacia-boss", chapter: .glacia, number: 6, title: "The Icebreaker",
+                briefing: "A plow tank with an armored nose is grinding across the ice toward you. It rams.",
+                tip: "Its front plow halves your damage. Lob shells high so they come down on top of it.",
+                objective: .destroyAll, par: 10, isBoss: true),
+        Mission(id: "rift-1", chapter: .rift, number: 1, title: "One Small Step",
+                briefing: "Low gravity, no air, no wind. Shots float a long way.",
+                tip: "Use gentle power. With no wind, a good shot works twice.",
+                objective: .destroyAll, par: 4),
+        Mission(id: "rift-2", chapter: .rift, number: 2, title: "Event Horizon",
+                briefing: "A black hole hangs between you and the target.",
+                tip: "Shells curve toward the black hole, and get swallowed if they fly too close. Arc around it.",
+                objective: .destroyAll, par: 5),
+        Mission(id: "rift-3", chapter: .rift, number: 3, title: "Slingshot",
+                briefing: "A towering wall hides the target. A black hole sits just beyond it.",
+                tip: "Send a shot over the wall and let the black hole pull it down onto the target.",
+                objective: .trickShot, par: 1),
+        Mission(id: "rift-4", chapter: .rift, number: 4, title: "Twin Wells",
+                briefing: "Two black holes pull in different directions.",
+                tip: "Find a path between them. A shot through the middle feels both pulls.",
+                objective: .destroyAll, par: 5),
+        Mission(id: "rift-5", chapter: .rift, number: 5, title: "Crater Siege",
+                briefing: "Two gunners dug into craters, with a black hole overhead.",
+                tip: "Fire a Black Hole of your own to bend their shots away from you.",
+                objective: .destroyAll, par: 8),
+        Mission(id: "rift-boss", chapter: .rift, number: 6, title: "The Mothership",
+                briefing: "The Mothership has arrived. It fires, then it abducts.",
+                tip: "Every other turn it lifts your tank with its tractor beam and drops it. Save your parachutes.",
+                objective: .destroyAll, par: 12, isBoss: true),
     ]
 
     static func with(id: String) -> Mission? { all.first { $0.id == id } }

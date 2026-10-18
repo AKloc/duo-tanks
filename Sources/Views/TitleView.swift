@@ -27,7 +27,7 @@ struct TitleView: View {
                 Button(action: onTour) {
                     VStack(spacing: 2) {
                         PlateLabel(title: "The Tour", systemImage: "globe.americas.fill", size: .large)
-                        Text("Campaign · two worlds, two bosses")
+                        Text("Campaign · five worlds, five bosses")
                             .font(.caption)
                             .foregroundStyle(.white.opacity(0.75))
                     }

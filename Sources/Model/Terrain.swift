@@ -39,6 +39,22 @@ struct Updraft: Sendable {
     let strength: Double
 }
 
+/// A point of intense gravity that bends shots toward it and swallows anything that gets too close.
+struct GravityWell: Sendable {
+    static let coreRadius = 14.0
+
+    let center: Vec
+    let strength: Double
+    /// Turns until it collapses; `nil` lasts forever.
+    var turnsLeft: Int?
+
+    func pull(on p: Vec) -> Vec {
+        let offset = center - p
+        let distance = max(offset.length, 1)
+        return offset / distance * strength * 1_000 / max(distance * distance, 900)
+    }
+}
+
 /// The ground, stored as one height per world-unit column measured up from the bottom, plus any floating islands.
 struct Terrain: Sendable {
     static let maxScorchMarks = 40
@@ -51,6 +67,15 @@ struct Terrain: Sendable {
     private(set) var updrafts: [Updraft] = []
     /// The ground is a bottomless sea of clouds rather than solid earth.
     private(set) var hasAbyss = false
+    private(set) var wells: [GravityWell] = []
+    /// Ground lower than this is a pool of lava.
+    private(set) var lavaLevel: Double?
+    /// Where volcanic vents sit; they erupt every few turns.
+    private(set) var vents: [Double] = []
+    /// Ice: hit tanks slide, and big blasts on slopes set off avalanches.
+    private(set) var isIcy = false
+    /// The wind keeps shifting while shells are in the air.
+    private(set) var hasGusts = false
     let maxHeight: Double
 
     var width: Int { heights.count }
@@ -80,6 +105,12 @@ struct Terrain: Sendable {
             return min(max(h, maxHeight * 0.06), maxHeight * 0.75)
         }
         grass = Array(repeating: 1, count: width)
+        if theme == .forge {
+            grass = Array(repeating: 0, count: width)
+            let low = heights.min() ?? 60
+            lavaLevel = low + 28
+            vents = [Double.random(in: 380...460), Double.random(in: 540...620)]
+        }
         if theme == .moon {
             for _ in 0..<Int.random(in: 5...8) {
                 let x = Double.random(in: 40...960)
@@ -155,6 +186,43 @@ struct Terrain: Sendable {
 
     func updraft(at x: Double) -> Double {
         updrafts.first { $0.x.contains(x) }?.strength ?? 0
+    }
+
+    /// Everything besides ordinary gravity and wind that pushes a shell around.
+    func force(at p: Vec) -> Vec {
+        wells.reduce(Vec(0, updraft(at: p.x))) { $0 + $1.pull(on: p) }
+    }
+
+    /// Whether a point has fallen into a gravity well's core.
+    func isSwallowed(_ p: Vec) -> Bool {
+        wells.contains { ($0.center - p).length < GravityWell.coreRadius }
+    }
+
+    /// Whether something standing at (`x`, `y`) is in lava.
+    func isInLava(x: Double, y: Double) -> Bool {
+        guard let lavaLevel else { return false }
+        return y < lavaLevel && height(at: x) < lavaLevel
+    }
+
+    mutating func addWell(_ well: GravityWell) {
+        wells.append(well)
+    }
+
+    /// Counts temporary wells down a turn and lets the spent ones collapse.
+    mutating func ageWells() {
+        for i in wells.indices { wells[i].turnsLeft? -= 1 }
+        wells.removeAll { ($0.turnsLeft ?? 1) <= 0 }
+    }
+
+    mutating func addHazards(wells: [GravityWell] = [], lavaLevel: Double? = nil, vents: [Double] = [], isIcy: Bool = false, hasGusts: Bool = false) {
+        self.wells += wells
+        if let lavaLevel { self.lavaLevel = lavaLevel }
+        self.vents += vents
+        if isIcy {
+            self.isIcy = true
+            grass = Array(repeating: 0, count: width)
+        }
+        if hasGusts { self.hasGusts = true }
     }
 
     /// A good place to put a tank near `x`: on the ground, or on the nearest island when there's no ground.

@@ -74,6 +74,18 @@ struct CampaignTests {
         #expect(findsWinningShot(missionID: "aerie-3", weapon: .missile, angles: stride(from: 15, through: 70, by: 5), powers: stride(from: 20, through: 70, by: 4)))
     }
 
+    @Test func firestarterCanBeSolvedWithNapalm() {
+        #expect(findsWinningShot(missionID: "cinder-4", weapon: .napalm, angles: stride(from: 20, through: 75, by: 5), powers: stride(from: 25, through: 90, by: 5)))
+    }
+
+    @Test func slipAndSlideCanBeSolvedWithAMissile() {
+        #expect(findsWinningShot(missionID: "glacia-3", weapon: .missile, angles: stride(from: 15, through: 75, by: 4), powers: stride(from: 30, through: 90, by: 3)))
+    }
+
+    @Test func slingshotCanBeSolvedWithAMissile() {
+        #expect(findsWinningShot(missionID: "rift-3", weapon: .missile, angles: stride(from: 30, through: 85, by: 3), powers: stride(from: 20, through: 80, by: 3)))
+    }
+
     @Test func runningOutOfAmmoOnATrickShotFailsTheMission() {
         let game = Game(mission: Mission.with(id: "terra-4")!, difficulty: .normal, settings: settings())
         game.fireForTesting(weapon: .roller, angle: 170, power: 20)
@@ -137,7 +149,9 @@ struct TourProgressTests {
         #expect(!progress.isUnlocked(.aerie))
         progress.record(terra[5], stars: 1)
         #expect(progress.isUnlocked(.aerie))
-        #expect(!progress.isUnlocked(.cinder), "not built yet")
+        #expect(!progress.isUnlocked(.cinder), "needs Aerie's boss first")
+        progress.record(Chapter.aerie.missions.last!, stars: 1)
+        #expect(progress.isUnlocked(.cinder))
     }
 
     @Test func threeFailuresLetYouSkipAhead() {

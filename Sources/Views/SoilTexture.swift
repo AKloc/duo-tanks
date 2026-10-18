@@ -19,6 +19,7 @@ enum SoilTexture {
             case .snow: Palette(deep: (0.17, 0.16, 0.19), top: (0.36, 0.31, 0.3))
             case .moon: Palette(deep: (0.2, 0.2, 0.22), top: (0.56, 0.56, 0.58))
             case .aerie: Palette(deep: (0.2, 0.17, 0.26), top: (0.5, 0.4, 0.34))
+            case .forge: Palette(deep: (0.1, 0.08, 0.08), top: (0.32, 0.2, 0.17))
             }
         }
     }

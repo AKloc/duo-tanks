@@ -20,6 +20,12 @@ enum TankKind: Equatable {
     case bastion
     /// A gun pod riding a boss through the air.
     case pod
+    /// Cinder's boss: a lava worm that burrows and resurfaces each turn.
+    case crawler
+    /// Glacia's boss: a plow tank that drives at you, rams, and is armored in front.
+    case icebreaker
+    /// The Rift's boss: a flying saucer with a tractor beam.
+    case mothership
 }
 
 struct Tank: Identifiable {
@@ -61,6 +67,8 @@ struct Tank: Identifiable {
     /// Shield points restored at the start of each of this tank's turns.
     var shieldRegen = 0.0
     var shieldCap = Tank.maxShield
+    /// Sideways speed while sliding on ice.
+    var slide = 0.0
 
     var side: Int { team ?? id }
     /// Bosses don't fall, slide or get buried.
@@ -84,10 +92,18 @@ struct Tank: Identifiable {
         switch kind {
         case .standard: position + Vec(0, Tank.bodyHeight)
         case .bastion: position + Vec(0, 18)
-        case .pod: position
+        case .crawler: position + Vec(0, 16)
+        case .icebreaker: position + Vec(0, 12)
+        case .pod, .mothership: position
         }
     }
-    var barrelLength: Double { kind == .bastion ? 26 : Tank.barrelLength }
+    var barrelLength: Double {
+        switch kind {
+        case .bastion, .icebreaker: 26
+        case .crawler, .mothership: 22
+        default: Tank.barrelLength
+        }
+    }
     var muzzle: Vec { turretCenter + barrelDirection * barrelLength }
     var barrelDirection: Vec {
         let radians = angle * .pi / 180
@@ -164,6 +180,9 @@ private struct IslandDrift {
     var riders: [Int: Int] = [:]
     var creatureFrom: Vec?
     var creatureTo: Vec?
+    /// Tanks driven along the ground: tank index to start and end.
+    var movers: [Int: (from: Vec, to: Vec)] = [:]
+    var ramTarget: (attacker: Int, target: Int)?
     var elapsed = 0.0
 }
 
@@ -232,7 +251,15 @@ struct MissionRun {
     var shotsUnderPar: Int { mission.par + difficulty.parAllowance }
 }
 
-/// The Sky Leviathan's flight.
+struct TractorBeam {
+    static let duration = 1.4
+
+    let sourceIndex: Int
+    let targetIndex: Int
+    var age = 0.0
+}
+
+/// A flying boss's path: the Sky Leviathan with its pods, or the Mothership.
 struct LeviathanFlight {
     let home: Vec
     var phase = 0.0
@@ -259,6 +286,9 @@ final class Game {
     nonisolated static let dangerHealth = 20.0
     /// Health lost by falling into the clouds below the islands.
     nonisolated static let abyssDamage = 50.0
+    nonisolated static let lavaDamagePerSecond = 30.0
+    /// How high the Mothership's tractor beam lifts a tank before letting go.
+    nonisolated static let abductionHeight = 60.0
     /// How long islands take to drift into place between turns.
     nonisolated static let islandDriftDuration = 1.4
     /// Power gained per second while the fire button is held.
@@ -303,6 +333,7 @@ final class Game {
     private(set) var computerStatus: String?
     private(set) var mission: MissionRun?
     private(set) var leviathan: LeviathanFlight?
+    private(set) var tractorBeam: TractorBeam?
 
     @ObservationIgnored private let sound = SoundEngine()
     @ObservationIgnored private let haptics = UIImpactFeedbackGenerator(style: .heavy)
@@ -329,6 +360,11 @@ final class Game {
     @ObservationIgnored private var killCamVictimID: Int?
     @ObservationIgnored private var driveTickDistance = 0.0
     @ObservationIgnored private var islandDrift: IslandDrift?
+    @ObservationIgnored private var gustTimer = 0.0
+    @ObservationIgnored private var mothershipTurns = 0
+    @ObservationIgnored private var turnNumber = 0
+    @ObservationIgnored private var lavaTextTimer = 0.0
+    @ObservationIgnored private var lavaDamage: [Int: Double] = [:]
 
     var current: Tank { tanks[currentIndex] }
 
@@ -433,7 +469,7 @@ final class Game {
         }
         leviathan = setup.leviathanHome.map { home in
             LeviathanFlight(home: home, center: home,
-                            pods: tanks.indices.filter { tanks[$0].kind == .pod }.map { ($0, tanks[$0].position - home) })
+                            pods: tanks.indices.filter { [.pod, .mothership].contains(tanks[$0].kind) }.map { ($0, tanks[$0].position - home) })
         }
         roundEarnings = Dictionary(uniqueKeysWithValues: players.map { ($0.id, RoundEarnings()) })
         resetBattlefield()
@@ -452,6 +488,9 @@ final class Game {
         computerTask = nil
         computerStatus = nil
         islandDrift = nil
+        tractorBeam = nil
+        mothershipTurns = 0
+        turnNumber = 0
         driveDirection = nil
         projectiles = []
         flames = []
@@ -642,6 +681,18 @@ final class Game {
 
     private func scheduleComputerTurn() {
         guard phase == .aiming, let difficulty = players.first(where: { $0.id == current.id })?.computer else { return }
+        if current.kind == .mothership {
+            mothershipTurns += 1
+            if mothershipTurns % 2 == 0 {
+                computerTask = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(1))
+                    guard let self, !Task.isCancelled else { return }
+                    while self.isTerrainMoving { try? await Task.sleep(for: .milliseconds(50)) }
+                    self.abduct()
+                }
+                return
+            }
+        }
         computerTask = Task { [weak self] in
             guard let self else { return }
             await ComputerPlayer.takeTurn(in: self, difficulty: difficulty)
@@ -1027,7 +1078,7 @@ final class Game {
 
         let isSmoking = !smolders.isEmpty || tanks.contains { $0.healthFraction < 0.5 }
         let isMoving = tanks.contains(where: \.isRocking) || turrets.contains { !$0.isResting }
-        let isAnimating = isSmoking || isMoving || islandDrift != nil || phase == .killCam || !beams.isEmpty || !particles.isEmpty || !floatingTexts.isEmpty || !explosions.isEmpty || shake > 0.01 || flash > 0.01
+        let isAnimating = isSmoking || isMoving || islandDrift != nil || tractorBeam != nil || phase == .killCam || !beams.isEmpty || !particles.isEmpty || !floatingTexts.isEmpty || !explosions.isEmpty || shake > 0.01 || flash > 0.01
         if !isAnimating && phase != .firing && chargeStartedAt == nil && driveDirection == nil {
             shake = 0
             flash = 0
@@ -1037,6 +1088,13 @@ final class Game {
     }
 
     private func simulate(_ dt: Double) {
+        if terrain.hasGusts, !projectiles.isEmpty {
+            gustTimer += dt
+            if gustTimer >= 0.7 {
+                gustTimer = 0
+                wind = min(max(wind + Double.random(in: -14...14, using: &rng), -Game.windReference * 1.3), Game.windReference * 1.3)
+            }
+        }
         var next: [Projectile] = []
         for var p in projectiles {
             p.age += dt
@@ -1049,14 +1107,24 @@ final class Game {
             }
         }
         projectiles = next
+        slideTanks(dt)
         settleTanks(dt)
+        burnInLava(dt)
         blowUpWrecks()
     }
 
     private func fly(_ p: inout Projectile, _ dt: Double) -> [Projectile] {
-        p.velocity += Vec(wind, terrain.updraft(at: p.position.x) - gravity) * dt
+        p.velocity += (Vec(wind, -gravity) + terrain.force(at: p.position)) * dt
         p.position += p.velocity * dt
         p.smokeTimer += dt
+        if terrain.isSwallowed(p.position) {
+            particles += (0..<10).map { _ in
+                Particle(kind: .spark, position: p.position, velocity: Vec(Double.random(in: -40...40), Double.random(in: -40...40)),
+                         lifetime: 0.4, size: 1.6, color: .purple)
+            }
+            lastImpact = p.position
+            return []
+        }
         if p.smokeTimer >= 0.035, p.weapon != .tracer {
             p.smokeTimer = 0
             particles.append(ParticleFactory.shellSmoke(at: p.position))
@@ -1227,6 +1295,13 @@ final class Game {
             explode(weapon, at: center, ownerID: p.ownerID, directHitID: directHitID, style: .plasma)
             return []
 
+        case .singularity:
+            explode(weapon, at: center, ownerID: p.ownerID, directHitID: directHitID, style: .plasma)
+            let core = Vec(center.x, min(center.y + 45, Game.worldSize.y - 20))
+            terrain.addWell(GravityWell(center: core, strength: 200, turnsLeft: 3))
+            floatingTexts.append(FloatingText(position: core + Vec(0, 30), text: "Black hole!", color: .purple))
+            return []
+
         case .explode, .splitAtApex, .riot, .laser:
             explode(weapon, at: center, ownerID: p.ownerID, directHitID: directHitID)
             return []
@@ -1237,6 +1312,7 @@ final class Game {
         let radius = weapon.blastRadius
         lastImpact = center
         terrain.carve(center: center, radius: radius, leavesScorch: style == .fire)
+        if terrain.isIcy, radius >= 20 { triggerAvalanche(at: center, size: radius) }
         blastEffects(at: center, radius: radius, style: style)
         undermine(around: center.x, radius: radius * 1.5, ownerID: ownerID)
 
@@ -1246,7 +1322,12 @@ final class Game {
             let distance = tanks[i].id == directHitID ? 0 : (tanks[i].turretCenter - center).length
             guard distance < reach else { continue }
             let falloff = distance / reach
-            damage(tankAt: i, by: weapon.damage * (1 - falloff * falloff), attackerID: ownerID)
+            var amount = weapon.damage * (1 - falloff * falloff)
+            if tanks[i].kind == .icebreaker, (center.x - tanks[i].position.x) * (tanks[i].angle <= 90 ? 1 : -1) > 4 {
+                amount *= 0.5
+                floatingTexts.append(FloatingText(position: tanks[i].turretCenter + Vec(0, 40), text: "Armored", color: .cyan))
+            }
+            damage(tankAt: i, by: amount, attackerID: ownerID)
         }
     }
 
@@ -1260,6 +1341,9 @@ final class Game {
             let side: Double = offset.x == 0 ? 1 : (offset.x > 0 ? 1 : -1)
             tanks[i].tiltVelocity -= side * push * 5
             tanks[i].hopVelocity += push * 70
+            if terrain.isIcy, !tanks[i].isAnchored {
+                tanks[i].slide += side * push * 70
+            }
         }
     }
 
@@ -1337,7 +1421,99 @@ final class Game {
     }
 
     private func isUnsettled(_ tank: Tank) -> Bool {
-        !tank.isAnchored && (tank.fallDistance > 0 || tank.position.y > terrain.support(at: tank.position.x, y: tank.position.y) + 0.5)
+        !tank.isAnchored && (tank.fallDistance > 0 || abs(tank.slide) > 0.5
+            || tank.position.y > terrain.support(at: tank.position.x, y: tank.position.y) + 0.5)
+    }
+
+    /// On ice, a pushed tank keeps sliding, speeding up downhill, until friction stops it or it hits a wall.
+    private func slideTanks(_ dt: Double) {
+        guard terrain.isIcy else { return }
+        for i in tanks.indices where !tanks[i].isAlive { tanks[i].slide = 0 }
+        for i in tanks.indices where !tanks[i].isAnchored && tanks[i].isAlive {
+            let x = tanks[i].position.x, y = tanks[i].position.y
+            let onGround = y <= terrain.support(at: x, y: y) + 0.5
+            let slope = (terrain.support(at: x + 3, y: y + 4) - terrain.support(at: x - 3, y: y + 4)) / 6
+            if tanks[i].slide == 0, abs(slope) < 0.7 || !onGround { continue }
+            if onGround {
+                tanks[i].slide -= slope * 160 * dt
+                tanks[i].slide *= max(0, 1 - 1.4 * dt)
+            }
+            if abs(tanks[i].slide) < 3, abs(slope) < 0.7 {
+                tanks[i].slide = 0
+                continue
+            }
+            let nextX = min(max(x + tanks[i].slide * dt, 12), Game.worldSize.x - 12)
+            if terrain.support(at: nextX, y: y + 4) > y + 3 {
+                tanks[i].slide = 0
+                continue
+            }
+            tanks[i].position.x = nextX
+            tanks[i].treadTravel += nextX - x
+            let ground = terrain.support(at: nextX, y: y + 2)
+            if ground > y { tanks[i].position.y = ground }
+        }
+    }
+
+    /// A big blast high on an icy slope sends snow sliding down onto whatever is below.
+    private func triggerAvalanche(at center: Vec, size: Double) {
+        let left = terrain.support(at: center.x - 50, y: center.y), right = terrain.support(at: center.x + 50, y: center.y)
+        guard max(center.y - left, center.y - right) > 25 else { return }
+        let direction: Double = left < right ? -1 : 1
+        let x = min(max(center.x + direction * 75, 20), Game.worldSize.x - 20)
+        let landing = Vec(x, terrain.support(at: x, y: center.y))
+        terrain.addDirt(center: landing, radius: size * 0.75)
+        particles += (0..<30).map { _ in
+            Particle(kind: .debris, position: center + Vec(direction * Double.random(in: 0...60), Double.random(in: 0...20)),
+                     velocity: Vec(direction * Double.random(in: 40...120), Double.random(in: -10...40)),
+                     lifetime: Double.random(in: 0.6...1.2), size: Double.random(in: 1.5...3.5), color: .white)
+        }
+        floatingTexts.append(FloatingText(position: landing + Vec(0, 40), text: "Avalanche!", color: .white))
+        shake = max(shake, 0.4)
+    }
+
+    /// Tanks standing in lava burn; the damage shows up as one number every half second.
+    private func burnInLava(_ dt: Double) {
+        guard terrain.lavaLevel != nil else { return }
+        for i in tanks.indices where tanks[i].isAlive && !tanks[i].isAnchored
+            && terrain.isInLava(x: tanks[i].position.x, y: tanks[i].position.y) {
+            let before = tanks[i].health
+            damage(tankAt: i, by: Game.lavaDamagePerSecond * dt, attackerID: tanks[i].lastAttackerID, bypassesShield: true, showsText: false)
+            lavaDamage[tanks[i].id, default: 0] += before - tanks[i].health
+            if Double.random(in: 0...1) < dt * 20 {
+                particles.append(Particle(kind: .fire, position: tanks[i].position + Vec(Double.random(in: -10...10), 2),
+                                          velocity: Vec(0, Double.random(in: 15...30)), lifetime: 0.5, size: 4, color: .orange))
+            }
+        }
+        lavaTextTimer += dt
+        guard lavaTextTimer >= 0.5 else { return }
+        lavaTextTimer = 0
+        for (id, amount) in lavaDamage where amount >= 1 {
+            if let tank = tanks.first(where: { $0.id == id }) {
+                floatingTexts.append(FloatingText(position: tank.turretCenter + Vec(0, 26), text: "-\(Int(amount.rounded()))", color: .orange))
+            }
+        }
+        lavaDamage = [:]
+    }
+
+    /// Every third turn the vents blow, building up the ground and scorching anything close.
+    private func eruptVents() {
+        guard !terrain.vents.isEmpty, turnNumber % 3 == 0 else { return }
+        for x in terrain.vents {
+            let mouth = Vec(x, terrain.support(at: x, y: .infinity))
+            terrain.addDirt(center: mouth + Vec(0, 4), radius: 16)
+            particles += ParticleFactory.explosion(at: mouth + Vec(0, 6), radius: 20)
+            particles += (0..<20).map { _ in
+                Particle(kind: .fire, position: mouth, velocity: Vec(Double.random(in: -40...40), Double.random(in: 80...200)),
+                         lifetime: Double.random(in: 0.6...1.2), size: Double.random(in: 3...6), color: .orange)
+            }
+            sound.explosion(atX: x, radius: 26)
+            for i in tanks.indices where tanks[i].isAlive && abs(tanks[i].position.x - x) < 35 {
+                damage(tankAt: i, by: 20, attackerID: nil, bypassesShield: true)
+            }
+            floatingTexts.append(FloatingText(position: mouth + Vec(0, 50), text: "Eruption!", color: .orange))
+        }
+        shake = max(shake, 0.5)
+        startLoop()
     }
 
     private func settleTanks(_ dt: Double) {
@@ -1442,6 +1618,10 @@ final class Game {
         explosions.removeAll { $0.age >= Explosion.duration }
 
         for i in beams.indices { beams[i].age += dt }
+        if tractorBeam != nil {
+            tractorBeam?.age += dt
+            if let beam = tractorBeam, beam.age >= TractorBeam.duration { tractorBeam = nil }
+        }
         beams.removeAll { $0.age >= Beam.lifetime }
 
         for i in floatingTexts.indices { floatingTexts[i].age += dt }
@@ -1547,6 +1727,10 @@ final class Game {
 
     private func endTurn() {
         sound.updateFlights([])
+        turnNumber += 1
+        terrain.ageWells()
+        applyTurnHazards()
+        if tanks[currentIndex].kind == .crawler, tanks[currentIndex].isAlive { burrow(currentIndex) }
         let alive = tanks.filter(\.isAlive)
         if Set(alive.map(\.side)).count <= 1 {
             if !startKillCam() { endRound(winnerID: alive.first?.side) }
@@ -1571,8 +1755,88 @@ final class Game {
             tanks[currentIndex].shield = min(tanks[currentIndex].shield + tanks[currentIndex].shieldRegen, tanks[currentIndex].shieldCap)
         }
         startIslandDrift()
+        if tanks[currentIndex].kind == .icebreaker { advanceIcebreaker(currentIndex) }
         phase = .aiming
         scheduleComputerTurn()
+    }
+
+    // MARK: Hazards and bosses between turns
+
+    /// Lava keeps burning and vents erupt. Deaths here aren't anyone's shot, so they don't get a kill cam.
+    private func applyTurnHazards() {
+        let aliveBefore = tanks.filter(\.isAlive).count
+        for i in tanks.indices where tanks[i].isAlive && !tanks[i].isAnchored && terrain.isInLava(x: tanks[i].position.x, y: tanks[i].position.y) {
+            damage(tankAt: i, by: 10, attackerID: tanks[i].lastAttackerID, bypassesShield: true)
+        }
+        eruptVents()
+        blowUpWrecks()
+        if tanks.filter(\.isAlive).count < aliveBefore { lastShot = nil }
+    }
+
+    /// The Magma Crawler dives and comes up somewhere else, well away from its enemies.
+    private func burrow(_ index: Int) {
+        let old = tanks[index].position
+        let enemyX = tanks.filter { $0.isAlive && $0.side != tanks[index].side }.map(\.position.x)
+        var best = old.x
+        for _ in 0..<20 {
+            let x = Double.random(in: 80...920)
+            let ground = terrain.support(at: x, y: .infinity)
+            guard enemyX.allSatisfy({ abs($0 - x) > 220 }), !terrain.isInLava(x: x, y: ground) else { continue }
+            best = x
+            break
+        }
+        terrain.carve(center: old + Vec(0, 6), radius: 18, leavesScorch: false)
+        particles += ParticleFactory.dirt(at: old, radius: 26)
+        tanks[index].position = Vec(best, terrain.support(at: best, y: .infinity))
+        particles += ParticleFactory.dirt(at: tanks[index].position, radius: 26)
+        floatingTexts.append(FloatingText(position: tanks[index].turretCenter + Vec(0, 40), text: "Resurfaced!", color: .orange))
+        tanks[index].angle = enemyX.first.map { $0 < best ? 135 : 45 } ?? tanks[index].angle
+        shake = max(shake, 0.3)
+    }
+
+    /// The Icebreaker plows toward its target and rams it if it gets close.
+    private func advanceIcebreaker(_ index: Int) {
+        guard let target = tanks.indices.first(where: { tanks[$0].isAlive && tanks[$0].side != tanks[index].side }) else { return }
+        let from = tanks[index].position
+        let gap = tanks[target].position.x - from.x
+        let travel = min(90, max(0, abs(gap) - 40))
+        guard travel > 5 else { return }
+        let x = from.x + (gap > 0 ? 1 : -1) * travel
+        var drift = islandDrift ?? IslandDrift()
+        drift.movers[index] = (from, Vec(x, terrain.support(at: x, y: .infinity)))
+        if abs(gap) - travel < 50 { drift.ramTarget = (index, target) }
+        islandDrift = drift
+        tanks[index].angle = gap > 0 ? 45 : 135
+        startLoop()
+    }
+
+    private func ram(by index: Int, target: Int) {
+        let direction: Double = tanks[target].position.x > tanks[index].position.x ? 1 : -1
+        damage(tankAt: target, by: 25, attackerID: tanks[index].id)
+        tanks[target].slide += direction * 160
+        tanks[target].hopVelocity += 60
+        floatingTexts.append(FloatingText(position: tanks[target].turretCenter + Vec(0, 40), text: "Rammed!", color: .white))
+        shake = max(shake, 0.6)
+        buzz(0.8)
+        sound.explosion(atX: tanks[target].position.x, radius: 18)
+        phase = .firing
+        lastShot = nil
+        startLoop()
+    }
+
+    /// The Mothership lifts its target high with a tractor beam and drops it.
+    private func abduct() {
+        guard let target = tanks.indices.first(where: { tanks[$0].isAlive && tanks[$0].side != current.side }) else { return }
+        lastShot = nil
+        victimsThisShot = []
+        phase = .firing
+        accumulator = 0
+        tractorBeam = TractorBeam(sourceIndex: currentIndex, targetIndex: target)
+        tanks[target].position.y += Game.abductionHeight
+        tanks[target].lastAttackerID = current.id
+        floatingTexts.append(FloatingText(position: tanks[target].turretCenter + Vec(0, 20), text: "Abducted!", color: .green))
+        sound.laser(atX: tanks[target].position.x)
+        startLoop()
     }
 
     // MARK: Drifting islands
@@ -1618,6 +1882,11 @@ final class Game {
                 tanks[index].position += delta
             }
         }
+        for (index, move) in drift.movers where tanks.indices.contains(index) {
+            let x = move.from.x + (move.to.x - move.from.x) * eased
+            tanks[index].position = Vec(x, terrain.support(at: x, y: max(move.from.y, move.to.y) + 40))
+            tanks[index].treadTravel += 1
+        }
         if let from = drift.creatureFrom, let to = drift.creatureTo, var flight = leviathan {
             flight.center = from + (to - from) * eased
             for pod in flight.pods where tanks.indices.contains(pod.index) {
@@ -1626,6 +1895,9 @@ final class Game {
             leviathan = flight
         }
         islandDrift = drift.elapsed >= Game.islandDriftDuration ? nil : drift
+        if islandDrift == nil, let ram = drift.ramTarget, tanks[ram.attacker].isAlive, tanks[ram.target].isAlive {
+            self.ram(by: ram.attacker, target: ram.target)
+        }
     }
 
     private func randomWind() -> Double {
