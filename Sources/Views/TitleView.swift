@@ -1,0 +1,167 @@
+import SwiftUI
+
+/// Match setup. Choices are remembered between launches.
+struct TitleView: View {
+    let onStart: (MatchSettings) -> Void
+
+    @AppStorage("rounds") private var rounds = 5
+    @AppStorage("startingMoney") private var startingMoney = 15_000
+    @AppStorage("world") private var world = WorldChoice.random
+    @AppStorage("weather") private var weather = WeatherSetting.auto
+    @AppStorage("wind") private var wind = WindSetting.normal
+    @AppStorage("roughness") private var roughness = Roughness.rolling
+    @AppStorage("volume") private var volume = 0.8
+    @AppStorage("haptics") private var hapticsEnabled = true
+
+    private static let moneyOptions = [5_000, 15_000, 30_000, 50_000]
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 22) {
+                header
+                worldPicker
+                section("Match") {
+                    Stepper(value: $rounds, in: 1...10) {
+                        LabeledContent("Rounds", value: "\(rounds)")
+                    }
+                    LabeledContent("Starting cash") {
+                        Picker("Starting cash", selection: $startingMoney) {
+                            ForEach(Self.moneyOptions, id: \.self) { amount in
+                                Text("$\(amount / 1000)k").tag(amount)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 300)
+                    }
+                }
+                section("Conditions") {
+                    segmented("Weather", selection: $weather, options: WeatherSetting.allCases) { $0.name }
+                    segmented("Wind", selection: $wind, options: WindSetting.allCases) { $0.name }
+                    segmented("Terrain", selection: $roughness, options: Roughness.allCases) { $0.name }
+                }
+                section("Sound and feel") {
+                    LabeledContent("Volume") {
+                        Slider(value: $volume, in: 0...1) {
+                            Text("Volume")
+                        } minimumValueLabel: {
+                            Image(systemName: "speaker.fill")
+                        } maximumValueLabel: {
+                            Image(systemName: "speaker.wave.3.fill")
+                        }
+                        .frame(maxWidth: 300)
+                    }
+                    Toggle("Haptics", isOn: $hapticsEnabled)
+                }
+                Button(action: start) {
+                    Label("Start Match", systemImage: "flame.fill")
+                        .font(.title3.bold())
+                        .frame(maxWidth: 320, minHeight: 54)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .buttonBorderShape(.capsule)
+                .padding(.bottom, 24)
+            }
+            .padding(.horizontal, 24)
+            .frame(maxWidth: 760)
+            .frame(maxWidth: .infinity)
+        }
+        .background {
+            LinearGradient(stops: ThemeLook.for(world.theme ?? .hills).sky, startPoint: .top, endPoint: .bottom)
+                .overlay(Color.black.opacity(0.35))
+                .ignoresSafeArea()
+                .animation(.easeInOut(duration: 0.4), value: world)
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private var header: some View {
+        VStack(spacing: 4) {
+            Text("DUO TANKS")
+                .font(.system(size: 56, weight: .black, design: .rounded))
+                .foregroundStyle(LinearGradient(colors: [.yellow, .orange, .red], startPoint: .top, endPoint: .bottom))
+                .shadow(color: .orange.opacity(0.6), radius: 16)
+            Text("An artillery duel for iPhone Duo")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.top, 28)
+    }
+
+    private var worldPicker: some View {
+        section("World") {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(WorldChoice.allCases) { choice in
+                        WorldCard(choice: choice, isSelected: choice == world) { world = choice }
+                    }
+                }
+                .padding(2)
+            }
+        }
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title.uppercased())
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func segmented<Option: Hashable>(_ title: String, selection: Binding<Option>, options: [Option], name: @escaping (Option) -> String) -> some View {
+        LabeledContent(title) {
+            Picker(title, selection: selection) {
+                ForEach(options, id: \.self) { Text(name($0)).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 300)
+        }
+    }
+
+    private func start() {
+        onStart(MatchSettings(
+            rounds: rounds, startingMoney: startingMoney, world: world, weather: weather,
+            wind: wind, roughness: roughness, volume: volume, hapticsEnabled: hapticsEnabled
+        ))
+    }
+}
+
+struct WorldCard: View {
+    let choice: WorldChoice
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: 6) {
+                ZStack {
+                    if let theme = choice.theme {
+                        let look = ThemeLook.for(theme)
+                        LinearGradient(stops: look.sky, startPoint: .top, endPoint: .bottom)
+                        VStack {
+                            Spacer()
+                            LinearGradient(colors: [look.ridges[1].color, look.ridges[2].color], startPoint: .top, endPoint: .bottom)
+                                .frame(height: 22)
+                        }
+                    } else {
+                        LinearGradient(colors: [.purple, .orange, .blue, .gray], startPoint: .topLeading, endPoint: .bottomTrailing)
+                        Image(systemName: "shuffle").font(.title2.bold()).foregroundStyle(.white)
+                    }
+                }
+                .frame(width: 128, height: 72)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(isSelected ? Color.orange : .white.opacity(0.15), lineWidth: isSelected ? 3 : 1))
+                Text(choice.name)
+                    .font(.caption.bold())
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}

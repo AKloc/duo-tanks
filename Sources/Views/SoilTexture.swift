@@ -8,9 +8,23 @@ enum SoilTexture {
         let image: CGImage
     }
 
+    struct Palette: Sendable {
+        let deep: (r: Double, g: Double, b: Double)
+        let top: (r: Double, g: Double, b: Double)
+
+        static func `for`(_ theme: WorldTheme) -> Palette {
+            switch theme {
+            case .hills: Palette(deep: (0.2, 0.16, 0.14), top: (0.46, 0.31, 0.18))
+            case .desert: Palette(deep: (0.42, 0.24, 0.13), top: (0.86, 0.6, 0.36))
+            case .snow: Palette(deep: (0.17, 0.16, 0.19), top: (0.36, 0.31, 0.3))
+            case .moon: Palette(deep: (0.2, 0.2, 0.22), top: (0.56, 0.56, 0.58))
+            }
+        }
+    }
+
     static let pixelsPerUnit = 2
 
-    nonisolated static func make(seed: UInt64 = 42) -> Rendered? {
+    nonisolated static func make(palette: Palette, seed: UInt64 = 42) -> Rendered? {
         let worldWidth = Int(Game.worldSize.x), worldHeight = Int(Game.worldSize.y)
         let width = worldWidth * pixelsPerUnit, height = worldHeight * pixelsPerUnit
         let noise = ValueNoise(seed: seed)
@@ -26,7 +40,7 @@ enum SoilTexture {
                 let grain = noise.fbm(x * 0.18, y * 0.18, octaves: 3)
                 let speck = noise.value(x * 0.85 + 500, y * 0.85)
 
-                var r = mix(0.2, 0.46, depth), g = mix(0.16, 0.31, depth), b = mix(0.14, 0.18, depth)
+                var r = mix(palette.deep.r, palette.top.r, depth), g = mix(palette.deep.g, palette.top.g, depth), b = mix(palette.deep.b, palette.top.b, depth)
                 let layer = 0.82 + 0.18 * strata
                 r *= layer + 0.05 * strata
                 g *= layer

@@ -3,6 +3,7 @@ import SwiftUI
 struct ControlPanel: View {
     let game: Game
     let hinge: HingeState?
+    let onQuit: () -> Void
 
     var body: some View {
         Group {
@@ -10,7 +11,7 @@ struct ControlPanel: View {
             case let .roundOver(winnerID):
                 RoundResults(game: game, winnerID: winnerID)
             case .matchOver:
-                MatchResults(game: game)
+                MatchResults(game: game, onQuit: onQuit)
             default:
                 controls(for: game.current)
             }
@@ -42,6 +43,13 @@ struct ControlPanel: View {
                         .font(.subheadline.monospacedDigit())
                         .foregroundStyle(.secondary)
                     HealthLabel(health: tank.health, shield: tank.shield)
+                    Menu {
+                        Text("\(game.theme.name) · gravity \(Int(game.theme.gravityScale * 100))%")
+                        Button("Quit to Title", systemImage: "xmark", role: .destructive, action: onQuit)
+                    } label: {
+                        Image(systemName: "ellipsis.circle").font(.title3)
+                    }
+                    .accessibilityLabel("Menu")
                 }
 
                 HStack(spacing: 12) {
@@ -66,7 +74,7 @@ struct ControlPanel: View {
                 }
             }
 
-            ArcadeButton(color: tank.color, charge: game.chargePower, onPress: game.beginCharge, onRelease: game.releaseCharge)
+            ArcadeButton(color: tank.color, charge: game.chargePower, hapticsEnabled: game.settings.hapticsEnabled, onPress: game.beginCharge, onRelease: game.releaseCharge)
         }
         .disabled(game.phase != .aiming)
     }
@@ -155,6 +163,7 @@ struct RoundResults: View {
 
 struct MatchResults: View {
     let game: Game
+    let onQuit: () -> Void
 
     var body: some View {
         let standings = game.standings
@@ -173,8 +182,12 @@ struct MatchResults: View {
                 }
                 .frame(maxWidth: 420)
             }
-            Button("New Match", systemImage: "arrow.clockwise", action: game.newMatch)
-                .buttonStyle(.borderedProminent)
+            HStack {
+                Button("Rematch", systemImage: "arrow.clockwise", action: game.newMatch)
+                    .buttonStyle(.borderedProminent)
+                Button("Main Menu", systemImage: "house", action: onQuit)
+                    .buttonStyle(.bordered)
+            }
         }
     }
 }
@@ -185,6 +198,7 @@ struct ArcadeButton: View {
 
     let color: Color
     let charge: Double?
+    let hapticsEnabled: Bool
     let onPress: () -> Void
     let onRelease: () -> Void
 
@@ -246,7 +260,7 @@ struct ArcadeButton: View {
                 isPressed = false
                 onRelease()
             })
-        .sensoryFeedback(.impact(weight: .heavy, intensity: 1), trigger: isPressed) { _, pressed in pressed }
+        .sensoryFeedback(.impact(weight: .heavy, intensity: 1), trigger: isPressed) { _, pressed in pressed && hapticsEnabled }
         .accessibilityLabel("Fire")
         .accessibilityHint("Hold to charge power, release to fire")
     }

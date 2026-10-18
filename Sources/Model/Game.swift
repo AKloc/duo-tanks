@@ -115,8 +115,9 @@ enum Phase: Equatable {
 @Observable
 final class Game {
     nonisolated static let worldSize = Vec(1000, 400)
-    nonisolated static let gravity = 200.0
-    nonisolated static let maxWind = 45.0
+    nonisolated static let standardGravity = 200.0
+    /// Normal-setting maximum wind, used to scale wind visuals.
+    nonisolated static let windReference = 45.0
     nonisolated static let speedPerPower = 6.0
     nonisolated static let fallSpeed = 160.0
     nonisolated static let parachuteSpeed = 35.0
@@ -124,6 +125,10 @@ final class Game {
     nonisolated static let chargeRate = 50.0
 
     private(set) var settings: MatchSettings
+    private(set) var theme = WorldTheme.hills
+    private(set) var weather = Weather.clear
+    private(set) var gravity = Game.standardGravity
+    private(set) var maxWind = Game.windReference
     private(set) var players: [Player] = []
     private(set) var round = 0
     private(set) var roundEarnings: [Int: RoundEarnings] = [:]
@@ -169,10 +174,21 @@ final class Game {
         startMatch(settings)
     }
 
+    func thunder() {
+        sound.thunder(atX: Double.random(in: 0...Game.worldSize.x))
+        buzz(0.3)
+    }
+
+    private func buzz(_ intensity: Double) {
+        guard settings.hapticsEnabled else { return }
+        haptics.impactOccurred(intensity: intensity)
+    }
+
     // MARK: Match flow
 
     func startMatch(_ settings: MatchSettings) {
         self.settings = settings
+        sound.volume = settings.volume
         players = [
             Player(id: 0, name: "Red", color: .red, money: settings.startingMoney),
             Player(id: 1, name: "Blue", color: .blue, money: settings.startingMoney),
@@ -189,7 +205,11 @@ final class Game {
         loop?.cancel()
         loop = nil
         round += 1
-        terrain = Terrain(width: Int(Game.worldSize.x), maxHeight: Game.worldSize.y)
+        theme = settings.world.theme ?? WorldTheme.allCases.randomElement()!
+        weather = settings.weather.resolve(for: theme)
+        gravity = Game.standardGravity * theme.gravityScale
+        maxWind = Game.windReference * settings.wind.scale * theme.windScale
+        terrain = Terrain(width: Int(Game.worldSize.x), maxHeight: Game.worldSize.y, theme: theme, roughness: settings.roughness.scale)
         let lanes: [ClosedRange<Double>] = [70...300, 700...930]
         tanks = players.map { player in
             let x = Double.random(in: lanes[player.id % lanes.count])
@@ -218,7 +238,7 @@ final class Game {
         shake = 0
         flash = 0
         currentIndex = Int.random(in: tanks.indices)
-        wind = Game.randomWind()
+        wind = randomWind()
         phase = .aiming
         sound.updateFlights([])
     }
@@ -271,7 +291,7 @@ final class Game {
         let before = current.angle
         let elevation = min(max(degrees - 80, 0), 90)
         setAngle(before <= 90 ? elevation : 180 - elevation)
-        if Int(before / 5) != Int(current.angle / 5) {
+        if settings.hapticsEnabled, Int(before / 5) != Int(current.angle / 5) {
             detents.selectionChanged()
         }
     }
@@ -285,7 +305,7 @@ final class Game {
         guard phase == .aiming, current.inventory.shields > 0, current.shield <= 0 else { return }
         tanks[currentIndex].inventory.shields -= 1
         tanks[currentIndex].shield = Tank.maxShield
-        haptics.impactOccurred(intensity: 0.4)
+        buzz(0.4)
     }
 
     func useRepairKit() {
@@ -294,7 +314,7 @@ final class Game {
         tanks[currentIndex].inventory.repairKits -= 1
         tanks[currentIndex].health += healed
         floatingTexts.append(FloatingText(position: current.turretCenter + Vec(0, 26), text: "+\(Int(healed.rounded()))", color: .green))
-        haptics.impactOccurred(intensity: 0.4)
+        buzz(0.4)
         startLoop()
     }
 
@@ -302,7 +322,7 @@ final class Game {
         guard phase == .aiming, chargeStartedAt == nil else { return }
         chargeStartedAt = .now
         chargePower = 0
-        rumble.start()
+        if settings.hapticsEnabled { rumble.start() }
         startLoop()
     }
 
@@ -329,7 +349,7 @@ final class Game {
 
         let direction = tank.barrelDirection
         particles += ParticleFactory.muzzle(at: tank.muzzle, direction: direction)
-        haptics.impactOccurred(intensity: 0.5)
+        buzz(0.5)
         shake = max(shake, 0.15)
         phase = .firing
 
@@ -340,7 +360,9 @@ final class Game {
             sound.dirt(atX: center.x)
             shake = max(shake, 0.3)
         } else {
-            var shell = Projectile(position: tank.muzzle, velocity: direction * tank.power * Game.speedPerPower, weapon: weapon, ownerID: tank.id)
+            // Low gravity also slows launches a little, so shots float and carry farther but stay on screen.
+            let speed = tank.power * Game.speedPerPower * pow(theme.gravityScale, 0.35)
+            var shell = Projectile(position: tank.muzzle, velocity: direction * speed, weapon: weapon, ownerID: tank.id)
             if case let .bounce(times) = weapon.behavior { shell.bouncesLeft = times }
             projectiles = [shell]
             sound.launch(atX: tank.position.x)
@@ -422,7 +444,7 @@ final class Game {
     }
 
     private func fly(_ p: inout Projectile, _ dt: Double) -> [Projectile] {
-        p.velocity += Vec(wind, -Game.gravity) * dt
+        p.velocity += Vec(wind, -gravity) * dt
         p.position += p.velocity * dt
         p.smokeTimer += dt
         if p.smokeTimer >= 0.035, p.weapon != .tracer {
@@ -588,7 +610,7 @@ final class Game {
         explosions.append(Explosion(center: center, radius: radius, isDirt: false))
         particles += ParticleFactory.explosion(at: center, radius: radius)
         sound.explosion(atX: center.x, radius: radius)
-        haptics.impactOccurred(intensity: min(1, 0.4 + radius / 80))
+        buzz(min(1, 0.4 + radius / 80))
         shake = min(1, max(shake, radius / 70))
         if radius >= 50 { flash = max(flash, min(1, radius / 100)) }
         let smolderTime = 4 + radius / 25
@@ -732,9 +754,9 @@ final class Game {
             switch p.kind {
             case .spark:
                 p.velocity *= 1 - 2.5 * dt
-                p.velocity.y -= Game.gravity * 0.3 * dt
+                p.velocity.y -= gravity * 0.3 * dt
             case .debris:
-                p.velocity.y -= Game.gravity * dt
+                p.velocity.y -= gravity * dt
                 p.velocity.x += wind * dt
             case .smoke:
                 p.velocity.x += wind * 0.5 * dt
@@ -806,12 +828,11 @@ final class Game {
         repeat {
             currentIndex = (currentIndex + 1) % tanks.count
         } while !tanks[currentIndex].isAlive
-        wind = Game.randomWind()
+        wind = randomWind()
         phase = .aiming
     }
 
-
-    private static func randomWind() -> Double {
-        Double.random(in: -maxWind...maxWind).rounded()
+    private func randomWind() -> Double {
+        maxWind > 0 ? Double.random(in: -maxWind...maxWind).rounded() : 0
     }
 }

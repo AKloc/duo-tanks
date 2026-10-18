@@ -12,13 +12,14 @@ struct Terrain {
 
     var width: Int { heights.count }
 
-    init(width: Int, maxHeight: Double) {
+    init(width: Int, maxHeight: Double, theme: WorldTheme = .hills, roughness: Double = 1) {
         self.maxHeight = maxHeight
         let base = maxHeight * Double.random(in: 0.25...0.4)
+        let waviness = theme == .desert ? 0.7 : 1
         let layers = (1...4).map { i in
             (
-                amplitude: maxHeight * 0.2 / Double(i),
-                frequency: Double(i) * Double.random(in: 0.8...1.8),
+                amplitude: maxHeight * 0.2 / Double(i) * roughness,
+                frequency: Double(i) * Double.random(in: 0.8...1.8) * waviness,
                 phase: Double.random(in: 0...(2 * .pi))
             )
         }
@@ -28,6 +29,12 @@ struct Terrain {
             return min(max(h, maxHeight * 0.06), maxHeight * 0.75)
         }
         grass = Array(repeating: 1, count: width)
+        if theme == .moon {
+            for _ in 0..<Int.random(in: 5...8) {
+                let x = Double.random(in: 40...960)
+                carve(center: Vec(x, height(at: x) + Double.random(in: 2...10)), radius: Double.random(in: 18...45), leavesScorch: false)
+            }
+        }
     }
 
     func height(at x: Double) -> Double {

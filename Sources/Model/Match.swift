@@ -45,6 +45,12 @@ struct Player: Identifiable {
 struct MatchSettings {
     var rounds = 5
     var startingMoney = 15_000
+    var world = WorldChoice.random
+    var weather = WeatherSetting.auto
+    var wind = WindSetting.normal
+    var roughness = Roughness.rolling
+    var volume = 0.8
+    var hapticsEnabled = true
 }
 
 /// Money earned this round, broken down for the results screen.

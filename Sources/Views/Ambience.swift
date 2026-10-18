@@ -27,7 +27,26 @@ final class Ambience {
         var isSpooked = false
     }
 
+    struct Drop {
+        var position: Vec
+        let speed: Double
+        let size: Double
+    }
+
+    struct Bolt {
+        let trunk: [Vec]
+        let branches: [[Vec]]
+        var age = 0.0
+
+        static let lifetime = 0.45
+    }
+
     private(set) var clouds: [Cloud]
+    private(set) var drops: [Drop] = []
+    private(set) var precipitation = Weather.Precipitation.none
+    private(set) var bolt: Bolt?
+    private(set) var lightningFlash = 0.0
+    private var untilStrike = Double.random(in: 4...9)
     private(set) var comets: [Comet] = []
     private(set) var flocks: [Flock] = []
     private var lastTime: Double?
@@ -39,12 +58,14 @@ final class Ambience {
     }
 
     /// `blasts` are explosion centers in the same normalized space; nearby flocks scatter.
-    func update(time: Double, wind: Double, blasts: [Vec]) {
+    func update(time: Double, wind: Double, blasts: [Vec], weather: Weather, onStrike: () -> Void) {
         let dt = lastTime.map { min(max(time - $0, 0), 0.1) } ?? 0
         lastTime = time
         guard dt > 0 else { return }
 
-        let drift = 0.004 + wind / Game.maxWind * 0.02
+        updateWeather(dt, wind: wind, weather: weather, onStrike: onStrike)
+
+        let drift = 0.004 + wind / Game.windReference * 0.02
         for i in clouds.indices {
             clouds[i].x += drift * dt
             if clouds[i].x > 1.3 { clouds[i] = Ambience.makeCloud(x: -0.3) }
@@ -76,6 +97,58 @@ final class Ambience {
             flocks[i].position += flocks[i].velocity * dt
         }
         flocks.removeAll { $0.position.x < -0.3 || $0.position.x > 1.3 || $0.position.y < -0.3 }
+    }
+
+    private func updateWeather(_ dt: Double, wind: Double, weather: Weather, onStrike: () -> Void) {
+        if weather.precipitation != precipitation {
+            precipitation = weather.precipitation
+            switch precipitation {
+            case .none: drops = []
+            case .rain: drops = (0..<170).map { _ in Drop(position: Vec(Double.random(in: 0...1), Double.random(in: 0...1)), speed: Double.random(in: 1.3...1.9), size: Double.random(in: 0.025...0.045)) }
+            case .snow: drops = (0..<140).map { _ in Drop(position: Vec(Double.random(in: 0...1), Double.random(in: 0...1)), speed: Double.random(in: 0.04...0.11), size: Double.random(in: 1...2.6)) }
+            }
+        }
+        let drift = wind / Game.windReference * (precipitation == .rain ? 0.3 : 0.08)
+        for i in drops.indices {
+            drops[i].position += Vec(drift, drops[i].speed) * dt
+            if drops[i].position.y > 1.05 {
+                drops[i].position = Vec(Double.random(in: -0.1...1.1), -0.05)
+            }
+            if drops[i].position.x > 1.1 { drops[i].position.x -= 1.2 }
+            if drops[i].position.x < -0.1 { drops[i].position.x += 1.2 }
+        }
+
+        if weather.hasLightning {
+            untilStrike -= dt
+            if untilStrike <= 0 {
+                bolt = Ambience.makeBolt()
+                lightningFlash = 1
+                untilStrike = Double.random(in: 5...13)
+                onStrike()
+            }
+        }
+        bolt?.age += dt
+        if let age = bolt?.age, age > Bolt.lifetime { bolt = nil }
+        lightningFlash *= exp(-7 * dt)
+    }
+
+    private static func makeBolt() -> Bolt {
+        var trunk = [Vec(Double.random(in: 0.15...0.85), -0.02)]
+        let bottom = Double.random(in: 0.55...0.8)
+        while trunk.last!.y < bottom {
+            let last = trunk.last!
+            trunk.append(Vec(last.x + Double.random(in: -0.03...0.03), last.y + Double.random(in: 0.03...0.06)))
+        }
+        let branches = (0..<2).map { _ in
+            var branch = [trunk[Int.random(in: 1..<max(2, trunk.count - 2))]]
+            let lean = Bool.random() ? 1.0 : -1.0
+            for _ in 0..<Int.random(in: 3...5) {
+                let last = branch.last!
+                branch.append(Vec(last.x + lean * Double.random(in: 0.01...0.035), last.y + Double.random(in: 0.025...0.05)))
+            }
+            return branch
+        }
+        return Bolt(trunk: trunk, branches: branches)
     }
 
     private static func makeCloud(x: Double) -> Cloud {

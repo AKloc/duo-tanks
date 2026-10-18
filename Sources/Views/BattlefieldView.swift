@@ -8,7 +8,7 @@ struct BattlefieldView: View {
     let game: Game
 
     @State private var ambience = Ambience()
-    @State private var soil: Image?
+    @State private var soils: [WorldTheme: Image] = [:]
 
     var body: some View {
         let terrain = game.terrain
@@ -23,6 +23,10 @@ struct BattlefieldView: View {
         let shake = game.shake
         let flash = game.flash
         let currentID = game.phase == .aiming ? game.current.id : nil
+        let theme = game.theme
+        let look = ThemeLook.for(theme)
+        let weather = game.weather
+        let soil = soils[theme]
 
         GeometryReader { proxy in
             let mapper = WorldMapper(size: proxy.size)
@@ -32,10 +36,10 @@ struct BattlefieldView: View {
                     let p = mapper.screen(e.center)
                     return Vec(p.x / proxy.size.width, p.y / proxy.size.height)
                 }
-                let _ = ambience.update(time: time, wind: wind, blasts: blasts)
+                let _ = ambience.update(time: time, wind: wind, blasts: blasts, weather: weather, onStrike: game.thunder)
                 Canvas { context, size in
-                    drawSky(in: &context, size: size, mapper: mapper, time: time)
-                    drawTerrain(terrain, in: &context, mapper: mapper, time: time, wind: wind)
+                    drawSky(look, weather: weather, in: &context, size: size, mapper: mapper, time: time)
+                    drawTerrain(terrain, look: look, soil: soil, in: &context, mapper: mapper, time: time, wind: wind)
                     drawTracers(tracers, tanks: tanks, in: &context, mapper: mapper)
                     drawFlames(flames, terrain: terrain, in: &context, mapper: mapper, time: time)
                     for tank in tanks {
@@ -52,8 +56,12 @@ struct BattlefieldView: View {
                     for text in floatingTexts {
                         drawFloatingText(text, in: &context, mapper: mapper)
                     }
+                    drawPrecipitation(in: &context, size: size, time: time)
                     drawVignette(in: &context, size: size)
                     drawWind(wind, in: &context, size: size)
+                    if ambience.lightningFlash > 0.01 {
+                        context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(red: 0.85, green: 0.9, blue: 1).opacity(ambience.lightningFlash * 0.35)))
+                    }
                     if flash > 0.01 {
                         context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white.opacity(flash * 0.8)))
                     }
@@ -69,115 +77,230 @@ struct BattlefieldView: View {
         }
         .background(Color(red: 0.05, green: 0.06, blue: 0.2))
         .clipped()
-        .task {
-            guard soil == nil else { return }
-            let rendered = await Task.detached(priority: .userInitiated) { SoilTexture.make() }.value
-            soil = rendered.map { Image(decorative: $0.image, scale: 1) }
+        .task(id: theme) {
+            guard soils[theme] == nil else { return }
+            let palette = SoilTexture.Palette.for(theme)
+            let rendered = await Task.detached(priority: .userInitiated) { SoilTexture.make(palette: palette) }.value
+            soils[theme] = rendered.map { Image(decorative: $0.image, scale: 1) }
         }
     }
 
     // MARK: Sky and background
 
-    private func drawSky(in context: inout GraphicsContext, size: CGSize, mapper: WorldMapper, time: Double) {
+    private func drawSky(_ look: ThemeLook, weather: Weather, in context: inout GraphicsContext, size: CGSize, mapper: WorldMapper, time: Double) {
         context.fill(Path(CGRect(origin: .zero, size: size)), with: .linearGradient(
-            Gradient(stops: [
-                .init(color: Color(red: 0.03, green: 0.04, blue: 0.14), location: 0),
-                .init(color: Color(red: 0.12, green: 0.1, blue: 0.3), location: 0.45),
-                .init(color: Color(red: 0.42, green: 0.24, blue: 0.4), location: 0.75),
-                .init(color: Color(red: 0.85, green: 0.5, blue: 0.42), location: 1),
-            ]),
-            startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height)
+            Gradient(stops: look.sky), startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height)
         ))
 
-        for i in 0..<120 {
+        let twinkles = look.starBrightness <= 1
+        for i in 0..<(look.starBrightness > 1 ? 200 : 120) {
             let point = CGPoint(x: hash(i, 1) * size.width, y: pow(hash(i, 2), 1.6) * size.height * 0.7)
             let r = 0.3 + pow(hash(i, 4), 3) * 1.4
-            let twinkle = 0.7 + 0.3 * sin(time * (0.8 + hash(i, 6) * 2.5) + Double(i))
+            let twinkle = twinkles ? 0.7 + 0.3 * sin(time * (0.8 + hash(i, 6) * 2.5) + Double(i)) : 1
             let fadeNearHorizon = 1 - point.y / (size.height * 0.75)
-            context.fill(Path(ellipseIn: CGRect(x: point.x - r, y: point.y - r, width: r * 2, height: r * 2)),
-                         with: .color(.white.opacity((0.25 + hash(i, 5) * 0.65) * twinkle * fadeNearHorizon)))
+            let opacity = min(1, (0.25 + hash(i, 5) * 0.65) * twinkle * fadeNearHorizon * look.starBrightness)
+            context.fill(Path(ellipseIn: CGRect(x: point.x - r, y: point.y - r, width: r * 2, height: r * 2)), with: .color(.white.opacity(opacity)))
         }
 
         for comet in ambience.comets {
             drawComet(comet, in: &context, size: size)
         }
 
-        drawMoon(at: mapper.screen(Vec(820, 330)), radius: 20 * mapper.scale, in: &context)
+        switch look.celestial {
+        case let .moon(tint): drawMoon(at: mapper.screen(Vec(820, 330)), radius: 20 * mapper.scale, tint: tint, in: &context)
+        case .sun: drawSun(at: mapper.screen(Vec(240, 235)), radius: 40 * mapper.scale, in: &context)
+        case .earth: drawEarth(at: mapper.screen(Vec(790, 315)), radius: 30 * mapper.scale, time: time, in: &context)
+        }
 
-        for cloud in ambience.clouds {
-            for puff in cloud.puffs {
-                let center = CGPoint(x: (cloud.x + puff.dx) * size.width, y: (cloud.y + puff.dy) * size.height)
-                let r = puff.radius * size.width
-                let rect = CGRect(x: center.x - r, y: center.y - r * 0.6, width: r * 2, height: r * 1.2)
-                context.fill(Path(ellipseIn: rect), with: .radialGradient(
-                    Gradient(colors: [Color(red: 0.8, green: 0.72, blue: 0.9).opacity(0.18), .clear]),
-                    center: center, startRadius: 0, endRadius: r
-                ))
+        let isOvercast = weather.precipitation == .rain || weather.hasLightning
+        if isOvercast {
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(red: 0.07, green: 0.07, blue: 0.1).opacity(0.6)))
+        }
+
+        if let cloudColor = look.cloudColor {
+            let cloudOpacity = isOvercast ? 0.3 : 0.18
+            for cloud in ambience.clouds {
+                for puff in cloud.puffs {
+                    let center = CGPoint(x: (cloud.x + puff.dx) * size.width, y: (cloud.y + puff.dy) * size.height)
+                    let r = puff.radius * size.width * (isOvercast ? 1.5 : 1)
+                    let rect = CGRect(x: center.x - r, y: center.y - r * 0.6, width: r * 2, height: r * 1.2)
+                    context.fill(Path(ellipseIn: rect), with: .radialGradient(
+                        Gradient(colors: [(isOvercast ? Color(white: 0.45) : cloudColor).opacity(cloudOpacity), .clear]),
+                        center: center, startRadius: 0, endRadius: r
+                    ))
+                }
             }
         }
 
-        let ridges: [(base: Double, amplitude: Double, color: Color)] = [
-            (175, 140, Color(red: 0.36, green: 0.27, blue: 0.46)),
-            (120, 120, Color(red: 0.22, green: 0.16, blue: 0.32)),
-            (70, 95, Color(red: 0.11, green: 0.08, blue: 0.18)),
-        ]
-        for (layer, ridge) in ridges.enumerated() {
+        if let bolt = ambience.bolt {
+            drawBolt(bolt, in: &context, size: size)
+        }
+
+        for (layer, ridge) in look.ridges.enumerated() {
             var path = Path()
             path.move(to: mapper.screen(Vec(0, 0)))
             for x in stride(from: 0.0, through: Game.worldSize.x, by: 6) {
-                path.addLine(to: mapper.screen(Vec(x, ridgeHeight(x, layer: layer, base: ridge.base, amplitude: ridge.amplitude))))
+                path.addLine(to: mapper.screen(Vec(x, ridgeHeight(x, layer: layer, ridge: ridge, shape: look.ridgeShape))))
             }
             path.addLine(to: mapper.screen(Vec(Game.worldSize.x, 0)))
             path.closeSubpath()
             context.fill(path, with: .color(ridge.color))
 
-            if layer == ridges.count - 1 {
-                context.fill(treeline(base: ridge.base, amplitude: ridge.amplitude, layer: layer, mapper: mapper), with: .color(ridge.color))
-            } else {
+            if layer == look.ridges.count - 1 {
+                drawTreeline(look.trees, ridge: ridge, layer: layer, shape: look.ridgeShape, in: &context, mapper: mapper)
+            } else if let haze = look.haze {
                 context.fill(Path(CGRect(origin: .zero, size: size)), with: .linearGradient(
-                    Gradient(colors: [.clear, Color(red: 0.75, green: 0.45, blue: 0.5).opacity(0.16)]),
+                    Gradient(colors: [.clear, haze.opacity(0.16)]),
                     startPoint: mapper.screen(Vec(0, ridge.base + ridge.amplitude)), endPoint: mapper.screen(Vec(0, ridge.base * 0.5))
                 ))
             }
         }
 
-        for flock in ambience.flocks {
-            drawFlock(flock, in: &context, size: size)
-        }
-    }
-
-    private func ridgeHeight(_ x: Double, layer: Int, base: Double, amplitude: Double) -> Double {
-        let n = BattlefieldView.ridgeNoise.fbm(x * 0.0045 * (1 + Double(layer) * 0.7), Double(layer) * 17.3, octaves: 5)
-        let ridged = 1 - abs(n * 2 - 1)
-        return base + amplitude * (0.55 * n + 0.45 * ridged)
-    }
-
-    private func treeline(base: Double, amplitude: Double, layer: Int, mapper: WorldMapper) -> Path {
-        var trees = Path()
-        for x in stride(from: 4.0, to: Game.worldSize.x, by: 7) where hash(Int(x), 11) > 0.35 {
-            let ground = ridgeHeight(x, layer: layer, base: base, amplitude: amplitude) - 1
-            let height = 7 + 13 * hash(Int(x), 12)
-            let halfWidth = height * 0.28
-            for tier in 0..<3 {
-                let bottom = ground + height * Double(tier) * 0.25
-                let top = bottom + height * (0.55 - Double(tier) * 0.08)
-                let w = halfWidth * (1 - Double(tier) * 0.25)
-                trees.move(to: mapper.screen(Vec(x - w, bottom)))
-                trees.addLine(to: mapper.screen(Vec(x, top)))
-                trees.addLine(to: mapper.screen(Vec(x + w, bottom)))
-                trees.closeSubpath()
+        if look.hasBirds {
+            for flock in ambience.flocks {
+                drawFlock(flock, in: &context, size: size)
             }
         }
-        return trees
     }
 
-    private func drawMoon(at center: CGPoint, radius r: Double, in context: inout GraphicsContext) {
+    private func ridgeHeight(_ x: Double, layer: Int, ridge: (base: Double, amplitude: Double, color: Color), shape: ThemeLook.RidgeShape) -> Double {
+        let octaves = shape == .rounded ? 3 : 5
+        let n = BattlefieldView.ridgeNoise.fbm(x * 0.0045 * (1 + Double(layer) * 0.7), Double(layer) * 17.3, octaves: octaves)
+        switch shape {
+        case .jagged:
+            let ridged = 1 - abs(n * 2 - 1)
+            return ridge.base + ridge.amplitude * (0.55 * n + 0.45 * ridged)
+        case .mesa:
+            return ridge.base + ridge.amplitude * min(1, max(0, (n - 0.38) * 3.2)) * 0.8
+        case .rounded:
+            return ridge.base + ridge.amplitude * n * 0.9
+        }
+    }
+
+    private func drawTreeline(_ trees: ThemeLook.Trees, ridge: (base: Double, amplitude: Double, color: Color), layer: Int, shape: ThemeLook.RidgeShape,
+                              in context: inout GraphicsContext, mapper: WorldMapper) {
+        var silhouettes = Path()
+        var snowCaps = Path()
+        switch trees {
+        case .none:
+            return
+        case let .pines(snowy):
+            for x in stride(from: 4.0, to: Game.worldSize.x, by: 7) where hash(Int(x), 11) > 0.35 {
+                let ground = ridgeHeight(x, layer: layer, ridge: ridge, shape: shape) - 1
+                let height = 7 + 13 * hash(Int(x), 12)
+                let halfWidth = height * 0.28
+                for tier in 0..<3 {
+                    let bottom = ground + height * Double(tier) * 0.25
+                    let top = bottom + height * (0.55 - Double(tier) * 0.08)
+                    let w = halfWidth * (1 - Double(tier) * 0.25)
+                    silhouettes.move(to: mapper.screen(Vec(x - w, bottom)))
+                    silhouettes.addLine(to: mapper.screen(Vec(x, top)))
+                    silhouettes.addLine(to: mapper.screen(Vec(x + w, bottom)))
+                    silhouettes.closeSubpath()
+                    if snowy {
+                        snowCaps.move(to: mapper.screen(Vec(x - w * 0.45, top - (top - bottom) * 0.45)))
+                        snowCaps.addLine(to: mapper.screen(Vec(x, top)))
+                        snowCaps.addLine(to: mapper.screen(Vec(x + w * 0.45, top - (top - bottom) * 0.45)))
+                        snowCaps.closeSubpath()
+                    }
+                }
+            }
+        case .cacti:
+            for x in stride(from: 10.0, to: Game.worldSize.x, by: 23) where hash(Int(x), 13) > 0.5 {
+                let ground = ridgeHeight(x, layer: layer, ridge: ridge, shape: shape) - 1
+                let height = 12 + 12 * hash(Int(x), 14)
+                silhouettes.addRoundedRect(in: CGRect(origin: mapper.screen(Vec(x - 1.4, ground + height)), size: CGSize(width: 2.8 * mapper.scale, height: height * mapper.scale)),
+                                           cornerSize: CGSize(width: 1.4 * mapper.scale, height: 1.4 * mapper.scale))
+                for side in [-1.0, 1.0] where hash(Int(x) + Int(side * 3), 15) > 0.3 {
+                    let armY = ground + height * (0.35 + 0.25 * hash(Int(x) + Int(side), 16))
+                    let armTop = armY + height * 0.35
+                    silhouettes.addRoundedRect(in: CGRect(origin: mapper.screen(Vec(x + side * 2.2 - (side > 0 ? 0 : 3.6), armY + 2)), size: CGSize(width: 3.6 * mapper.scale, height: 2 * mapper.scale)),
+                                               cornerSize: CGSize(width: mapper.scale, height: mapper.scale))
+                    silhouettes.addRoundedRect(in: CGRect(origin: mapper.screen(Vec(x + side * 4.6 - 1.1, armTop)), size: CGSize(width: 2.2 * mapper.scale, height: (armTop - armY) * mapper.scale)),
+                                               cornerSize: CGSize(width: 1.1 * mapper.scale, height: 1.1 * mapper.scale))
+                }
+            }
+        }
+        context.fill(silhouettes, with: .color(ridge.color))
+        context.fill(snowCaps, with: .color(Color(red: 0.85, green: 0.9, blue: 1).opacity(0.8)))
+    }
+
+    private func drawSun(at center: CGPoint, radius r: Double, in context: inout GraphicsContext) {
+        context.fill(Path(ellipseIn: CGRect(x: center.x - r * 5, y: center.y - r * 5, width: r * 10, height: r * 10)),
+                     with: .radialGradient(Gradient(colors: [Color(red: 1, green: 0.75, blue: 0.4).opacity(0.5), .clear]), center: center, startRadius: r, endRadius: r * 5))
+        context.fill(Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)), with: .linearGradient(
+            Gradient(colors: [Color(red: 1, green: 0.93, blue: 0.65), Color(red: 1, green: 0.55, blue: 0.25)]),
+            startPoint: CGPoint(x: center.x, y: center.y - r), endPoint: CGPoint(x: center.x, y: center.y + r)))
+    }
+
+    private func drawEarth(at center: CGPoint, radius r: Double, time: Double, in context: inout GraphicsContext) {
+        context.fill(Path(ellipseIn: CGRect(x: center.x - r * 1.6, y: center.y - r * 1.6, width: r * 3.2, height: r * 3.2)),
+                     with: .radialGradient(Gradient(colors: [Color(red: 0.4, green: 0.6, blue: 1).opacity(0.35), .clear]), center: center, startRadius: r, endRadius: r * 1.6))
+        let disc = CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)
+        context.fill(Path(ellipseIn: disc), with: .radialGradient(
+            Gradient(colors: [Color(red: 0.25, green: 0.5, blue: 0.95), Color(red: 0.05, green: 0.15, blue: 0.4)]),
+            center: CGPoint(x: center.x - r * 0.35, y: center.y - r * 0.35), startRadius: 0, endRadius: r * 1.5))
+        var surface = context
+        surface.clip(to: Path(ellipseIn: disc))
+        let spin = time * 0.01
+        for i in 0..<6 {
+            let u = (hash(i, 50) + spin).truncatingRemainder(dividingBy: 1) * 2.6 - 0.8
+            let land = CGRect(x: center.x + (u - 0.5) * r * 2, y: center.y + (hash(i, 51) - 0.5) * r * 1.6, width: r * (0.4 + hash(i, 52) * 0.6), height: r * (0.25 + hash(i, 53) * 0.4))
+            surface.fill(Path(ellipseIn: land), with: .color(Color(red: 0.25, green: 0.55, blue: 0.3).opacity(0.85)))
+        }
+        for i in 0..<5 {
+            let u = (hash(i, 60) + spin * 1.6).truncatingRemainder(dividingBy: 1) * 2.6 - 0.8
+            let cloud = CGRect(x: center.x + (u - 0.5) * r * 2, y: center.y + (hash(i, 61) - 0.5) * r * 1.8, width: r * (0.6 + hash(i, 62) * 0.7), height: r * 0.18)
+            surface.fill(Path(roundedRect: cloud, cornerRadius: r * 0.09), with: .color(.white.opacity(0.7)))
+        }
+        surface.fill(Path(ellipseIn: disc), with: .linearGradient(Gradient(colors: [.clear, .black.opacity(0.65)]),
+                                                                  startPoint: CGPoint(x: center.x - r * 0.2, y: center.y), endPoint: CGPoint(x: center.x + r, y: center.y)))
+    }
+
+    private func drawBolt(_ bolt: Ambience.Bolt, in context: inout GraphicsContext, size: CGSize) {
+        let fade = 1 - bolt.age / Ambience.Bolt.lifetime
+        var glow = context
+        glow.blendMode = .plusLighter
+        for (index, line) in ([bolt.trunk] + bolt.branches).enumerated() {
+            var path = Path()
+            path.addLines(line.map { CGPoint(x: $0.x * size.width, y: $0.y * size.height) })
+            let width = index == 0 ? 2.4 : 1.2
+            glow.stroke(path, with: .color(Color(red: 0.6, green: 0.7, blue: 1).opacity(fade * 0.5)), style: StrokeStyle(lineWidth: width * 4, lineCap: .round, lineJoin: .round))
+            glow.stroke(path, with: .color(.white.opacity(fade)), style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
+        }
+    }
+
+    private func drawPrecipitation(in context: inout GraphicsContext, size: CGSize, time: Double) {
+        guard !ambience.drops.isEmpty else { return }
+        switch ambience.precipitation {
+        case .none:
+            return
+        case .rain:
+            var streaks = Path()
+            let slant = game.wind / Game.windReference * 0.3
+            for drop in ambience.drops {
+                let top = CGPoint(x: drop.position.x * size.width, y: drop.position.y * size.height)
+                streaks.move(to: top)
+                streaks.addLine(to: CGPoint(x: top.x + slant * drop.size * size.height, y: top.y + drop.size * size.height))
+            }
+            context.stroke(streaks, with: .color(Color(red: 0.75, green: 0.8, blue: 0.95).opacity(0.35)), lineWidth: 1)
+        case .snow:
+            for (i, flake) in ambience.drops.enumerated() {
+                let sway = sin(time * 1.3 + Double(i)) * 6
+                let center = CGPoint(x: flake.position.x * size.width + sway, y: flake.position.y * size.height)
+                let r = flake.size
+                context.fill(Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)), with: .color(.white.opacity(0.85)))
+            }
+        }
+    }
+
+    private func drawMoon(at center: CGPoint, radius r: Double, tint: Color, in context: inout GraphicsContext) {
         context.fill(Path(ellipseIn: CGRect(x: center.x - r * 4, y: center.y - r * 4, width: r * 8, height: r * 8)),
-                     with: .radialGradient(Gradient(colors: [Color(red: 1, green: 0.95, blue: 0.85).opacity(0.22), .clear]),
+                     with: .radialGradient(Gradient(colors: [tint.opacity(0.22), .clear]),
                                            center: center, startRadius: r, endRadius: r * 4))
         let disc = CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)
         context.fill(Path(ellipseIn: disc), with: .radialGradient(
-            Gradient(colors: [Color(red: 1, green: 0.98, blue: 0.9), Color(red: 0.88, green: 0.84, blue: 0.74)]),
+            Gradient(colors: [tint, tint.mix(with: .gray, by: 0.25)]),
             center: CGPoint(x: center.x - r * 0.3, y: center.y - r * 0.3), startRadius: 0, endRadius: r * 1.4
         ))
         var maria = context
@@ -224,7 +347,7 @@ struct BattlefieldView: View {
 
     // MARK: Ground
 
-    private func drawTerrain(_ terrain: Terrain, in context: inout GraphicsContext, mapper: WorldMapper, time: Double, wind: Double) {
+    private func drawTerrain(_ terrain: Terrain, look: ThemeLook, soil: Image?, in context: inout GraphicsContext, mapper: WorldMapper, time: Double, wind: Double) {
         let s = mapper.scale
         let heights = terrain.heights
         let last = terrain.width - 1
@@ -288,17 +411,24 @@ struct BattlefieldView: View {
         context.stroke(charred, with: .color(Color(red: 0.13, green: 0.1, blue: 0.08)), style: StrokeStyle(lineWidth: 2.2 * s, lineCap: .round))
         for (level, path) in rims.enumerated() {
             let t = Double(level) / 4
-            context.stroke(path, with: .color(Color(red: 0.2 + 0.35 * t, green: 0.22 + 0.4 * t, blue: 0.14 + 0.2 * t)),
-                           style: StrokeStyle(lineWidth: 2.2 * s, lineCap: .round))
+            let color: Color = switch look.surface {
+            case .grass: Color(red: 0.2 + 0.35 * t, green: 0.22 + 0.4 * t, blue: 0.14 + 0.2 * t)
+            case .snow: Color(red: 0.62 + 0.36 * t, green: 0.68 + 0.3 * t, blue: 0.82 + 0.18 * t)
+            case let .dust(rim): rim.mix(with: .black, by: 0.55 - 0.45 * t)
+            }
+            let width: Double = if case .snow = look.surface { 4.5 } else { 2.2 }
+            context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: width * s, lineCap: .round))
         }
 
-        drawGrass(terrain, in: &context, mapper: mapper, time: time, wind: wind)
+        if case .grass = look.surface {
+            drawGrass(terrain, in: &context, mapper: mapper, time: time, wind: wind)
+        }
     }
 
     private func drawGrass(_ terrain: Terrain, in context: inout GraphicsContext, mapper: WorldMapper, time: Double, wind: Double) {
         let heights = terrain.heights
         var blades = Array(repeating: Path(), count: 3)
-        let lean = wind / Game.maxWind
+        let lean = wind / Game.windReference
         for i in stride(from: 2, to: terrain.width - 3, by: 2) {
             guard hash(i, 21) < terrain.grass[i], abs(heights[i + 2] - heights[i - 2]) < 6 else { continue }
             for k in 0..<2 {
@@ -480,6 +610,15 @@ struct BattlefieldView: View {
         context.stroke(trail, with: .color(.white.opacity(0.12)), lineWidth: max(0.8, 0.8 * s))
 
         let head = mapper.screen(projectile.position)
+        if head.y < 0 {
+            var marker = Path()
+            marker.move(to: CGPoint(x: head.x, y: 4))
+            marker.addLine(to: CGPoint(x: head.x - 6, y: 14))
+            marker.addLine(to: CGPoint(x: head.x + 6, y: 14))
+            marker.closeSubpath()
+            context.fill(marker, with: .color(.orange.opacity(0.9)))
+            return
+        }
         var shell = context
         shell.translateBy(x: head.x, y: head.y)
         shell.rotate(by: .radians(atan2(-projectile.velocity.y, projectile.velocity.x)))

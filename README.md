@@ -53,6 +53,17 @@ You earn **$40 per point of damage** to opponents, **$2,500 per kill** (includin
 
 Tanks that lose the ground under them fall and take damage, and destroyed tanks cook off in a small blast.
 
+## Worlds and weather
+
+Pick a world on the title screen, or let each round roll a random one:
+
+- **Moonlit Hills:** grass, pines and a full moon.
+- **Desert Dusk:** mesas, saguaros and a setting sun.
+- **Snowy Night:** falling snow, snowy peaks and frosted pines.
+- **The Moon:** 40% gravity and no wind; shots float and carry farther. Earth hangs in the sky.
+
+Weather can be clear, rain or storm (lightning and thunder), or left on auto. You can also set wind strength, terrain roughness, rounds, starting cash, volume and haptics.
+
 ## Run it
 
 Requires Xcode 27.1+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).

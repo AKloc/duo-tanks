@@ -18,6 +18,15 @@ final class SoundEngine {
     private lazy var dirtBuffer = makeBuffer(duration: 0.5) { t, noise in
         noise.lowPass(0.05) * exp(-t * 9) * 1.6
     }
+    private lazy var thunderBuffer = makeBuffer(duration: 3.2) { t, noise in
+        let crack = t < 0.08 ? noise.lowPass(0.5) * (1 - t / 0.08) * 0.8 : 0
+        let roll = noise.lowPass(0.02) * 4 * (1 - exp(-t * 12)) * exp(-t * 1.3) * (0.75 + 0.25 * sin(t * 9))
+        return crack + roll
+    }
+
+    var volume = 0.8 {
+        didSet { engine.mainMixerNode.outputVolume = Float(volume) }
+    }
 
     init() {
         try? AVAudioSession.sharedInstance().setCategory(.ambient)
@@ -43,6 +52,10 @@ final class SoundEngine {
         let buffer = explosionBuffers[key] ?? makeExplosion(radius: radius)
         explosionBuffers[key] = buffer
         play(buffer, atX: x, volume: Float(min(1, 0.55 + radius / 120)))
+    }
+
+    func thunder(atX x: Double) {
+        play(thunderBuffer, atX: x, volume: 0.9)
     }
 
     func dirt(atX x: Double) {

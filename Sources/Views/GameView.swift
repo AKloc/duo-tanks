@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct GameView: View {
-    @State private var game = Game()
+    let game: Game
+    let onQuit: () -> Void
+
     @State private var hinge: HingeState?
 
     private var isLaptopPosture: Bool { hinge?.isPartiallyOpen ?? false }
@@ -15,7 +17,7 @@ struct GameView: View {
                 VStack(spacing: 0) {
                     BattlefieldView(game: game)
                         .frame(maxHeight: .infinity)
-                    ControlPanel(game: game, hinge: hinge)
+                    ControlPanel(game: game, hinge: hinge, onQuit: onQuit)
                         .frame(maxHeight: isLaptopPosture ? .infinity : nil)
                         .fixedSize(horizontal: false, vertical: !isLaptopPosture)
                 }
