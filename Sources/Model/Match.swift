@@ -5,8 +5,10 @@ struct Inventory {
     var parachutes = 0
     var shields = 0
     var repairKits = 0
+    /// World units of driving left.
+    var fuel = 0.0
 
-    static let starting = Inventory(ammo: [.missile: 2])
+    static let starting = Inventory(ammo: [.missile: 2], fuel: 30)
 
     /// `nil` means unlimited.
     func count(of weapon: Weapon) -> Int? {
@@ -19,6 +21,7 @@ struct Inventory {
         case .parachute: parachutes
         case .shield: shields
         case .repairKit: repairKits
+        case .fuel: Int(fuel.rounded(.down))
         }
     }
 
@@ -28,6 +31,7 @@ struct Inventory {
         case .parachute: parachutes += quantity
         case .shield: shields += quantity
         case .repairKit: repairKits += quantity
+        case .fuel: fuel += Double(quantity)
         }
     }
 }
@@ -77,9 +81,9 @@ enum Economy {
 
 enum ShopItem: Hashable, Identifiable {
     case weapon(Weapon)
-    case parachute, shield, repairKit
+    case parachute, shield, repairKit, fuel
 
-    static let catalog: [ShopItem] = Weapon.arsenal.filter { !$0.isUnlimited }.map(ShopItem.weapon) + [.parachute, .shield, .repairKit]
+    static let catalog: [ShopItem] = Weapon.arsenal.filter { !$0.isUnlimited }.map(ShopItem.weapon) + [.parachute, .shield, .repairKit, .fuel]
 
     var id: String {
         switch self {
@@ -87,6 +91,7 @@ enum ShopItem: Hashable, Identifiable {
         case .parachute: "parachute"
         case .shield: "shield"
         case .repairKit: "repairKit"
+        case .fuel: "fuel"
         }
     }
 
@@ -96,6 +101,7 @@ enum ShopItem: Hashable, Identifiable {
         case .parachute: "Parachute"
         case .shield: "Shield"
         case .repairKit: "Repair Kit"
+        case .fuel: "Fuel"
         }
     }
 
@@ -121,6 +127,7 @@ enum ShopItem: Hashable, Identifiable {
         case .parachute: 3_000
         case .shield: 8_000
         case .repairKit: 4_000
+        case .fuel: 1_500
         }
     }
 
@@ -136,6 +143,7 @@ enum ShopItem: Hashable, Identifiable {
             }
         case .parachute: 2
         case .shield, .repairKit: 1
+        case .fuel: 60
         }
     }
 
@@ -161,6 +169,7 @@ enum ShopItem: Hashable, Identifiable {
         case .parachute: "Opens automatically when you fall. No fall damage."
         case .shield: "A bubble that absorbs 60 damage."
         case .repairKit: "Restores 35 health on your turn."
+        case .fuel: "Drive your tank on your turn. Steep slopes stop you."
         }
     }
 
@@ -183,6 +192,7 @@ enum ShopItem: Hashable, Identifiable {
         case .parachute: "umbrella.fill"
         case .shield: "shield.lefthalf.filled"
         case .repairKit: "wrench.and.screwdriver"
+        case .fuel: "fuelpump.fill"
         }
     }
 }

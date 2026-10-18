@@ -87,6 +87,7 @@ struct ControlPanel: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    DrivePad(fuel: tank.inventory.fuel, onStart: game.startDriving, onStop: game.stopDriving)
                 }
             }
 
@@ -129,6 +130,63 @@ struct ControlPanel: View {
         }
         .buttonStyle(.bordered)
         .accessibilityLabel("Gear")
+    }
+}
+
+/// Hold an arrow to drive; shows fuel left.
+struct DrivePad: View {
+    let fuel: Double
+    let onStart: (Double) -> Void
+    let onStop: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            arrow("arrowtriangle.left.fill", direction: -1)
+            VStack(spacing: 2) {
+                Image(systemName: "fuelpump.fill").font(.caption2)
+                Text("\(Int(fuel.rounded(.down)))").font(.caption.monospacedDigit().bold())
+            }
+            .foregroundStyle(fuel > 0 ? .primary : .secondary)
+            .frame(minWidth: 30)
+            arrow("arrowtriangle.right.fill", direction: 1)
+        }
+        .disabled(fuel <= 0)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Drive, \(Int(fuel)) fuel")
+    }
+
+    private func arrow(_ symbol: String, direction: Double) -> some View {
+        HoldButton(symbol: symbol, onPress: { onStart(direction) }, onRelease: onStop)
+            .accessibilityLabel(direction < 0 ? "Drive left" : "Drive right")
+    }
+}
+
+struct HoldButton: View {
+    let symbol: String
+    let onPress: () -> Void
+    let onRelease: () -> Void
+
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isPressed = false
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.title3)
+            .frame(width: 40, height: 36)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(isPressed ? 0.6 : 0.15)))
+            .scaleEffect(isPressed ? 0.94 : 1)
+            .opacity(isEnabled ? 1 : 0.4)
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    guard !isPressed else { return }
+                    isPressed = true
+                    onPress()
+                }
+                .onEnded { _ in
+                    isPressed = false
+                    onRelease()
+                })
     }
 }
 

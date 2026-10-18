@@ -122,6 +122,52 @@ struct GameplayTests {
         #expect(abs(game.tanks[1].health - (100 - (80 - 6) * 0.5)) < 0.5)
     }
 
+    @Test func drivingMovesTheTankAndBurnsFuel() {
+        let game = makeGame()
+        game.setFuel(50, ofTank: 0)
+        game.startDriving(1)
+        for _ in 0..<60 { game.stepForTesting() }
+        game.stopDriving()
+        let moved = game.tanks[0].position.x - 300
+        #expect(abs(moved - Game.driveSpeed) < 1)
+        #expect(abs(game.tanks[0].inventory.fuel - (50 - moved)) < 0.01)
+    }
+
+    @Test func drivingStopsWhenTheFuelRunsOut() {
+        let game = makeGame()
+        game.setFuel(10, ofTank: 0)
+        game.startDriving(-1)
+        for _ in 0..<120 { game.stepForTesting() }
+        #expect(abs(game.tanks[0].position.x - 290) < 0.5)
+        #expect(game.driveDirection == nil)
+    }
+
+    @Test func aSteepSlopeStopsTheTank() {
+        let game = makeGame()
+        var heights = Array(repeating: 100.0, count: 1000)
+        for x in 320..<1000 { heights[x] = 150 }
+        game.installScenario(terrain: Terrain(heights: heights), tankXs: [300, 700])
+        game.setFuel(100, ofTank: 0)
+        game.startDriving(1)
+        for _ in 0..<180 { game.stepForTesting() }
+        #expect(game.tanks[0].position.x < 320)
+        #expect(game.driveDirection == nil)
+    }
+
+    @Test func drivingOffACliffHurts() {
+        let game = makeGame()
+        var heights = Array(repeating: 100.0, count: 1000)
+        for x in 0..<310 { heights[x] = 180 }
+        game.installScenario(terrain: Terrain(heights: heights), tankXs: [300, 700])
+        game.setFuel(40, ofTank: 0)
+        game.startDriving(1)
+        for _ in 0..<180 { game.stepForTesting() }
+        game.stopDriving()
+        for _ in 0..<120 { game.stepForTesting() }
+        #expect(game.tanks[0].position.y < 101)
+        #expect(abs(game.tanks[0].health - (100 - (80 - 6) * 0.5)) < 1)
+    }
+
     @Test func aShieldSoaksUpTheBlast() throws {
         let game = makeGame()
         game.setCurrentTank(1)

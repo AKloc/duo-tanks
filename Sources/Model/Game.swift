@@ -41,6 +41,8 @@ struct Tank: Identifiable {
     var hop = 0.0
     var hopVelocity = 0.0
     var hasTurret = true
+    /// How far the treads have turned, for animating them.
+    var treadTravel = 0.0
 
     var isRocking: Bool { abs(tilt) > 0.002 || abs(tiltVelocity) > 0.01 || hop > 0.01 || hopVelocity > 0.01 }
 
@@ -163,6 +165,7 @@ final class Game {
     nonisolated static let speedPerPower = 6.0
     nonisolated static let fallSpeed = 160.0
     nonisolated static let parachuteSpeed = 35.0
+    nonisolated static let driveSpeed = 28.0
     /// Power gained per second while the fire button is held.
     nonisolated static let chargeRate = 50.0
     /// The simulation always advances in steps this long, so a shot plays out the same way every time.
@@ -198,6 +201,8 @@ final class Game {
     private(set) var camera: Camera?
     /// Playback speed of the simulation; slowed during the kill cam.
     private(set) var timeScale = 1.0
+    /// -1 or +1 while the current tank is driving.
+    private(set) var driveDirection: Double?
     /// What the computer is doing on its turn, for the control panel.
     private(set) var computerStatus: String?
 
@@ -224,6 +229,7 @@ final class Game {
     @ObservationIgnored private var killCamHold = 0.0
     @ObservationIgnored private var killCamImpactTime: Double?
     @ObservationIgnored private var killCamVictimID: Int?
+    @ObservationIgnored private var driveTickDistance = 0.0
 
     var current: Tank { tanks[currentIndex] }
 
@@ -302,6 +308,7 @@ final class Game {
             )
         }
         roundEarnings = Dictionary(uniqueKeysWithValues: players.map { ($0.id, RoundEarnings()) })
+        driveDirection = nil
         projectiles = []
         flames = []
         tracers = [:]
@@ -424,8 +431,50 @@ final class Game {
         startLoop()
     }
 
+    func startDriving(_ direction: Double) {
+        guard phase == .aiming, current.inventory.fuel > 0 else { return }
+        driveDirection = direction < 0 ? -1 : 1
+        startLoop()
+    }
+
+    func stopDriving() {
+        driveDirection = nil
+    }
+
+    private func drive(_ dt: Double) {
+        guard let direction = driveDirection, phase == .aiming else { return }
+        var tank = current
+        let step = min(Game.driveSpeed * dt, tank.inventory.fuel)
+        guard step > 0 else { return stopDriving() }
+        let nextX = min(max(tank.position.x + direction * step, 12), Game.worldSize.x - 12)
+        let ahead = terrain.height(at: nextX)
+        if ahead - tank.position.y > step * 1.3 + 0.2 {
+            stopDriving()
+            floatingTexts.append(FloatingText(position: tank.turretCenter + Vec(0, 26), text: "Too steep", color: .gray))
+            buzz(0.3)
+            return
+        }
+        tank.inventory.fuel -= abs(nextX - tank.position.x)
+        tank.treadTravel += nextX - tank.position.x
+        tank.position.x = nextX
+        tank.position.y = max(tank.position.y, ahead)
+        tanks[currentIndex] = tank
+        if Double.random(in: 0...1) < dt * 25 {
+            particles.append(Particle(kind: .debris, position: Vec(tank.position.x - direction * 12, ahead + 1),
+                                      velocity: Vec(-direction * Double.random(in: 10...30), Double.random(in: 8...25)),
+                                      lifetime: 0.5, size: 1.4, color: Color(red: 0.45, green: 0.33, blue: 0.2)))
+        }
+        driveTickDistance += step
+        if driveTickDistance >= 12, settings.hapticsEnabled {
+            driveTickDistance = 0
+            detents.selectionChanged()
+        }
+        if tank.inventory.fuel <= 0 { stopDriving() }
+    }
+
     func beginCharge() {
         guard phase == .aiming, chargeStartedAt == nil else { return }
+        stopDriving()
         chargeStartedAt = .now
         chargePower = 0
         if settings.hapticsEnabled, !isComputerTurn { rumble.start() }
@@ -585,6 +634,18 @@ final class Game {
         }
 
         updateKillCam(dt)
+        if phase == .aiming {
+            drive(dt)
+            if driveDirection != nil || tanks.contains(where: { $0.fallDistance > 0 || $0.position.y > terrain.height(at: $0.position.x) + 0.5 }) {
+                settleTanks(dt)
+                blowUpWrecks()
+                // Driving off a cliff to your death ends your turn.
+                if !current.isAlive {
+                    stopDriving()
+                    phase = .firing
+                }
+            }
+        }
         if phase == .firing || phase == .killCam {
             accumulator += dt * timeScale
             while accumulator >= Game.stepDuration {
@@ -610,7 +671,7 @@ final class Game {
         let isSmoking = !smolders.isEmpty || tanks.contains { $0.health < 50 }
         let isMoving = tanks.contains(where: \.isRocking) || turrets.contains { !$0.isResting }
         let isAnimating = isSmoking || isMoving || phase == .killCam || !particles.isEmpty || !floatingTexts.isEmpty || !explosions.isEmpty || shake > 0.01 || flash > 0.01
-        if !isAnimating && phase != .firing && chargeStartedAt == nil {
+        if !isAnimating && phase != .firing && chargeStartedAt == nil && driveDirection == nil {
             shake = 0
             flash = 0
             return false
@@ -1102,6 +1163,10 @@ extension Game {
         explosions = []
         lastImpact = nil
         phase = .aiming
+    }
+
+    func setFuel(_ fuel: Double, ofTank index: Int) {
+        tanks[index].inventory.fuel = fuel
     }
 
     func setCurrentTank(_ index: Int) {

@@ -50,8 +50,13 @@ You earn **$40 per point of damage** to opponents, **$2,500 per kill** (includin
 | Parachute | $3,000 for 2 | Opens automatically when you fall; no fall damage |
 | Shield | $8,000 | A bubble that absorbs 60 damage (raise it on your turn) |
 | Repair Kit | $4,000 | Restores 35 health on your turn |
+| Fuel | $1,500 for 60 | Drive your tank on your turn; everyone starts with 30 |
 
 Tanks that lose the ground under them fall and take damage. Blasts rock nearby tanks and bounce them on their tracks, tanks sit tilted on slopes, and destroyed tanks cook off and throw their turrets.
+
+## Driving
+
+Hold the ◀ ▶ arrows on your turn to drive. Driving burns fuel and doesn't end your turn. Gentle slopes are fine, steep ones stop you, and driving off a cliff hurts unless you have a parachute.
 
 ## Kill cam
 

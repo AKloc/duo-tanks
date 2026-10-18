@@ -527,7 +527,7 @@ struct BattlefieldView: View {
         let track = CGRect(x: -15 * s, y: -5 * s, width: 30 * s, height: 5 * s)
         body.fill(Path(roundedRect: track, cornerRadius: 2.5 * s), with: .color(Color(white: 0.1)))
         body.stroke(Path(roundedRect: track.insetBy(dx: 0.5 * s, dy: 0.5 * s), cornerRadius: 2.2 * s),
-                    with: .color(Color(white: 0.4).opacity(0.5)), style: StrokeStyle(lineWidth: 0.8 * s, dash: [1.1 * s, 1.1 * s]))
+                    with: .color(Color(white: 0.4).opacity(0.5)), style: StrokeStyle(lineWidth: 0.8 * s, dash: [1.1 * s, 1.1 * s], dashPhase: -tank.treadTravel * facing * s))
         for i in 0..<6 {
             let wheel = CGPoint(x: track.minX + (3 + Double(i) * 4.8) * s, y: track.midY)
             let r = 1.9 * s
