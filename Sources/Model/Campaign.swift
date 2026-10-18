@@ -171,7 +171,7 @@ struct Mission: Identifiable, Equatable {
                 objective: .destroyAll, par: 5),
         Mission(id: "terra-4", chapter: .terra, number: 4, title: "Downhill Delivery",
                 briefing: "A target sits at the bottom of a deep gorge. You have two Rollers. Make them count.",
-                tip: "Rollers roll downhill when they land. Drop one on the slope above the target.",
+                tip: "Rollers roll downhill, but the hump on the slope stops them. Land one past the hump, just above the gorge.",
                 objective: .trickShot, par: 1),
         Mission(id: "terra-5", chapter: .terra, number: 5, title: "Crossfire",
                 briefing: "You're surrounded: one gunner on each side.",

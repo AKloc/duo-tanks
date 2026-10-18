@@ -422,6 +422,11 @@ struct MissionResults: View {
     var body: some View {
         if let run = game.mission {
             VStack(spacing: 10) {
+                Text("\(run.mission.chapter.name.uppercased()) · \(run.mission.isBoss ? "BOSS" : run.mission.code) · \(run.mission.title.uppercased())")
+                    .font(.system(size: 13, weight: .heavy).width(.expanded))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Text(won ? (run.mission.isBoss ? "Boss defeated!" : "Mission complete") : "Mission failed")
                     .font(.title2.bold())
                     .foregroundStyle(won ? .yellow : .red)

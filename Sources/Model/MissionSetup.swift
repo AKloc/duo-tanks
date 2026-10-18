@@ -69,17 +69,19 @@ struct MissionSetup {
                 enemies: [EnemySpec(name: "Gunner", color: .blue, x: 830, health: 80, aimCap: .normal)]
             )
         case "terra-4":
+            // A hump partway down the slope stops Rollers that land too high, leaving a narrow strip above the gorge.
             let terrain = ground(seed: 14, noise: 4) { x in
-                switch x {
+                let slope: Double = switch x {
                 case ..<300: 250
                 case ..<600: 250 - (x - 300) / 300 * 190
                 case ..<680: 45
                 case ..<720: 45 + (x - 680) / 40 * 245
                 default: 290
                 }
+                return slope + 32 * exp(-pow((x - 520) / 14, 2))
             }
             return MissionSetup(
-                terrain: terrain, wind: 0...0, playerX: 170,
+                terrain: terrain, wind: -10 ... -10, playerX: 170,
                 playerInventory: Inventory(ammo: [.roller: 2], fuel: 0, hasUnlimitedShells: false),
                 enemies: [EnemySpec(name: "Target", color: .orange, x: 640, health: 50, isDummy: true, fixedHealth: true)]
             )
