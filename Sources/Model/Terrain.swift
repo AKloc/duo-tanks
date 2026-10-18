@@ -37,19 +37,26 @@ struct Terrain {
     }
 
     /// Removes a circle of ground; anything above the hole drops into it.
-    mutating func carve(center: Vec, radius: Double) {
+    mutating func carve(center: Vec, radius: Double, leavesScorch: Bool = true) {
         for span in spans(center: center, radius: radius) {
             let h = heights[span.column]
             guard h > span.bottom else { continue }
             heights[span.column] = span.bottom + max(0, h - span.top)
         }
-        let burn = radius * 1.5
-        for i in max(0, Int(center.x - burn))...min(width - 1, Int(center.x + burn)) {
-            let distance = abs(Double(i) - center.x) / burn
-            grass[i] = min(grass[i], max(0, (distance - 0.75) / 0.25))
-        }
+        guard leavesScorch else { return }
+        burnGrass(around: center.x, radius: radius * 1.5)
         scorchMarks.append((center, radius))
         if scorchMarks.count > Terrain.maxScorchMarks { scorchMarks.removeFirst() }
+    }
+
+    /// Burns grass away, fully near `x` and fading out toward `radius`.
+    mutating func burnGrass(around x: Double, radius: Double) {
+        let lo = max(0, Int(x - radius)), hi = min(width - 1, Int(x + radius))
+        guard lo <= hi else { return }
+        for i in lo...hi {
+            let distance = abs(Double(i) - x) / radius
+            grass[i] = min(grass[i], max(0, (distance - 0.75) / 0.25))
+        }
     }
 
     /// Drops a circle's worth of dirt onto each column it covers.

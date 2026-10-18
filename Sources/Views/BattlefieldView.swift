@@ -14,6 +14,8 @@ struct BattlefieldView: View {
         let terrain = game.terrain
         let tanks = game.tanks
         let projectiles = game.projectiles
+        let flames = game.flames
+        let tracers = game.tracers
         let explosions = game.explosions
         let particles = game.particles
         let floatingTexts = game.floatingTexts
@@ -34,8 +36,10 @@ struct BattlefieldView: View {
                 Canvas { context, size in
                     drawSky(in: &context, size: size, mapper: mapper, time: time)
                     drawTerrain(terrain, in: &context, mapper: mapper, time: time, wind: wind)
+                    drawTracers(tracers, tanks: tanks, in: &context, mapper: mapper)
+                    drawFlames(flames, terrain: terrain, in: &context, mapper: mapper, time: time)
                     for tank in tanks {
-                        drawTank(tank, isCurrent: tank.id == currentID, in: &context, mapper: mapper)
+                        drawTank(tank, isCurrent: tank.id == currentID, in: &context, mapper: mapper, time: time)
                     }
                     drawParticles(particles, kinds: [.smoke], in: &context, mapper: mapper)
                     for explosion in explosions {
@@ -317,7 +321,7 @@ struct BattlefieldView: View {
 
     // MARK: Actors
 
-    private func drawTank(_ tank: Tank, isCurrent: Bool, in context: inout GraphicsContext, mapper: WorldMapper) {
+    private func drawTank(_ tank: Tank, isCurrent: Bool, in context: inout GraphicsContext, mapper: WorldMapper, time: Double) {
         let s = mapper.scale
         let base = mapper.screen(tank.position)
         let turret = mapper.screen(tank.turretCenter)
@@ -380,7 +384,14 @@ struct BattlefieldView: View {
         antenna.addLine(to: CGPoint(x: turret.x - 7 * facing * s, y: turret.y - 15 * s))
         context.stroke(antenna, with: .color(Color(white: 0.2)), lineWidth: 0.6 * s)
 
+        if tank.isParachuting {
+            drawParachute(above: turret, scale: s, in: &context)
+        }
+
         guard tank.isAlive else { return }
+        if tank.shield > 0 {
+            drawShield(around: turret, strength: tank.shield / Tank.maxShield, scale: s, time: time, in: &context)
+        }
         let bar = CGRect(x: base.x - 14 * s, y: turret.y - 24 * s, width: 28 * s, height: 3.5 * s)
         context.fill(Path(roundedRect: bar, cornerRadius: 1.5 * s), with: .color(.black.opacity(0.55)))
         context.fill(Path(roundedRect: CGRect(x: bar.minX, y: bar.minY, width: bar.width * tank.health / 100, height: bar.height), cornerRadius: 1.5 * s),
@@ -397,8 +408,72 @@ struct BattlefieldView: View {
         }
     }
 
+    private func drawParachute(above turret: CGPoint, scale s: Double, in context: inout GraphicsContext) {
+        let canopy = CGRect(x: turret.x - 16 * s, y: turret.y - 40 * s, width: 32 * s, height: 18 * s)
+        var dome = Path()
+        dome.addArc(center: CGPoint(x: canopy.midX, y: canopy.maxY), radius: canopy.width / 2, startAngle: .degrees(180), endAngle: .degrees(360), clockwise: false)
+        dome.closeSubpath()
+        context.fill(dome, with: .linearGradient(Gradient(colors: [Color(white: 0.95), Color(red: 0.85, green: 0.35, blue: 0.2)]),
+                                                 startPoint: CGPoint(x: canopy.midX, y: canopy.minY), endPoint: CGPoint(x: canopy.midX, y: canopy.maxY)))
+        var lines = Path()
+        for dx in [-16.0, -6, 6, 16] {
+            lines.move(to: CGPoint(x: canopy.midX + dx * s, y: canopy.maxY))
+            lines.addLine(to: CGPoint(x: turret.x + dx * 0.3 * s, y: turret.y - 3 * s))
+        }
+        context.stroke(lines, with: .color(.white.opacity(0.6)), lineWidth: 0.6 * s)
+    }
+
+    private func drawShield(around turret: CGPoint, strength: Double, scale s: Double, time: Double, in context: inout GraphicsContext) {
+        let r = (20 + sin(time * 3) * 0.6) * s
+        let bubble = CGRect(x: turret.x - r, y: turret.y - r, width: r * 2, height: r * 2)
+        var glow = context
+        glow.blendMode = .plusLighter
+        glow.fill(Path(ellipseIn: bubble), with: .radialGradient(
+            Gradient(colors: [.clear, .cyan.opacity(0.08 + 0.12 * strength), .cyan.opacity(0.25 + 0.35 * strength)]),
+            center: turret, startRadius: 0, endRadius: r
+        ))
+        glow.stroke(Path(ellipseIn: bubble), with: .color(.cyan.opacity(0.4 + 0.5 * strength)), lineWidth: 1.2 * s)
+    }
+
+    private func drawTracers(_ tracers: [Int: [Vec]], tanks: [Tank], in context: inout GraphicsContext, mapper: WorldMapper) {
+        for (ownerID, points) in tracers where points.count > 1 {
+            let color = tanks.first { $0.id == ownerID }?.color ?? .white
+            var path = Path()
+            path.addLines(points.map(mapper.screen))
+            context.stroke(path, with: .color(color.opacity(0.7)), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [4, 4]))
+            if let end = points.last {
+                let p = mapper.screen(end)
+                context.stroke(Path(ellipseIn: CGRect(x: p.x - 5, y: p.y - 5, width: 10, height: 10)), with: .color(color), lineWidth: 1.5)
+            }
+        }
+    }
+
+    private func drawFlames(_ flames: [Flame], terrain: Terrain, in context: inout GraphicsContext, mapper: WorldMapper, time: Double) {
+        var glow = context
+        glow.blendMode = .plusLighter
+        for flame in flames {
+            let base = mapper.screen(Vec(flame.x, terrain.height(at: flame.x) + 2))
+            let flicker = 0.75 + 0.25 * sin(time * 17 + flame.x)
+            let r = 14 * mapper.scale * flicker * min(1, flame.life)
+            glow.fill(Path(ellipseIn: CGRect(x: base.x - r, y: base.y - r, width: r * 2, height: r * 2)), with: .radialGradient(
+                Gradient(colors: [.yellow.opacity(0.8), .orange.opacity(0.5), .clear]), center: base, startRadius: 0, endRadius: r))
+        }
+    }
+
     private func drawProjectile(_ projectile: Projectile, in context: inout GraphicsContext, mapper: WorldMapper) {
         let s = mapper.scale
+        if projectile.burrowTimeLeft != nil { return }
+        if projectile.rollDirection != nil {
+            let center = mapper.screen(projectile.position)
+            let r = 2.8 * s
+            context.fill(Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)), with: .radialGradient(
+                Gradient(colors: [Color(white: 0.75), Color(white: 0.2)]), center: CGPoint(x: center.x - r * 0.4, y: center.y - r * 0.4), startRadius: 0, endRadius: r * 1.6))
+            var glow = context
+            glow.blendMode = .plusLighter
+            glow.fill(Path(ellipseIn: CGRect(x: center.x - r * 2.5, y: center.y - r * 2.5, width: r * 5, height: r * 5)),
+                      with: .radialGradient(Gradient(colors: [.red.opacity(0.5), .clear]), center: center, startRadius: 0, endRadius: r * 2.5))
+            return
+        }
         let points = (projectile.trail + [projectile.position]).map(mapper.screen)
         var trail = Path()
         trail.addLines(points)

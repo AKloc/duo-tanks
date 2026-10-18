@@ -6,9 +6,12 @@ struct ControlPanel: View {
 
     var body: some View {
         Group {
-            if case let .gameOver(winnerID) = game.phase {
-                gameOver(winner: winnerID.map { game.tanks[$0] })
-            } else {
+            switch game.phase {
+            case let .roundOver(winnerID):
+                RoundResults(game: game, winnerID: winnerID)
+            case .matchOver:
+                MatchResults(game: game)
+            default:
                 controls(for: game.current)
             }
         }
@@ -19,36 +22,36 @@ struct ControlPanel: View {
     }
 
     private func controls(for tank: Tank) -> some View {
-        HStack(spacing: 20) {
-            VStack(spacing: 12) {
-                HStack {
+        let money = game.players.first { $0.id == tank.id }?.money ?? 0
+        return HStack(spacing: 20) {
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
                     Circle().fill(tank.color).frame(width: 12, height: 12)
                     Text("\(tank.name)'s turn").font(.headline)
+                    Text("Round \(game.round)/\(game.settings.rounds)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Spacer()
                     if hinge?.isPartiallyOpen == true {
-                        Label("Hinge aiming", systemImage: "laptopcomputer")
+                        Image(systemName: "laptopcomputer")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .accessibilityLabel("Hinge aiming")
                     }
-                    Text("HP \(Int(tank.health.rounded(.up)))").monospacedDigit()
+                    Text(money, format: .currency(code: "USD").precision(.fractionLength(0)))
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    HealthLabel(health: tank.health, shield: tank.shield)
                 }
 
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     Stepper(value: Binding(get: { tank.angle }, set: game.setAngle), in: 0...180) {
                         Text("Angle \(Int(tank.angle))°").monospacedDigit().lineLimit(1)
                     }
-                    .frame(maxWidth: 220)
+                    .frame(maxWidth: 200)
                     Spacer(minLength: 0)
-                    Menu {
-                        ForEach(Weapon.arsenal) { weapon in
-                            let count = tank.ammoCount(weapon)
-                            Button("\(weapon.name)  \(count.map(String.init) ?? "∞")") { game.select(weapon) }
-                                .disabled(count == 0)
-                        }
-                    } label: {
-                        Label(tank.selectedWeapon.name, systemImage: "scope").lineLimit(1)
-                    }
-                    .buttonStyle(.bordered)
+                    weaponMenu(for: tank)
+                    gearMenu(for: tank)
                 }
 
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -68,12 +71,109 @@ struct ControlPanel: View {
         .disabled(game.phase != .aiming)
     }
 
-    private func gameOver(winner: Tank?) -> some View {
-        VStack(spacing: 12) {
-            Text(winner.map { "\($0.name) wins!" } ?? "Everybody loses!")
-                .font(.title.bold())
+    private func weaponMenu(for tank: Tank) -> some View {
+        Menu {
+            ForEach(Weapon.arsenal) { weapon in
+                let count = tank.ammoCount(weapon)
+                if count != 0 {
+                    Button("\(weapon.name)  \(count.map(String.init) ?? "∞")") { game.select(weapon) }
+                }
+            }
+        } label: {
+            Label(tank.selectedWeapon.name, systemImage: ShopItem.weapon(tank.selectedWeapon).systemImage).lineLimit(1)
+        }
+        .buttonStyle(.bordered)
+    }
+
+    private func gearMenu(for tank: Tank) -> some View {
+        let gear = tank.inventory
+        return Menu {
+            Button("Raise Shield (\(gear.shields))", systemImage: ShopItem.shield.systemImage, action: game.activateShield)
+                .disabled(gear.shields == 0 || tank.shield > 0)
+            Button("Use Repair Kit (\(gear.repairKits))", systemImage: ShopItem.repairKit.systemImage, action: game.useRepairKit)
+                .disabled(gear.repairKits == 0 || tank.health >= 100)
+            Label("Parachutes: \(gear.parachutes)", systemImage: ShopItem.parachute.systemImage)
+        } label: {
+            Label("Gear", systemImage: "shippingbox")
+                .labelStyle(.iconOnly)
+                .overlay(alignment: .topTrailing) {
+                    if gear.shields + gear.repairKits + gear.parachutes > 0 {
+                        Circle().fill(.orange).frame(width: 7, height: 7).offset(x: 5, y: -4)
+                    }
+                }
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel("Gear")
+    }
+}
+
+struct HealthLabel: View {
+    let health: Double
+    let shield: Double
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if shield > 0 {
+                Label("\(Int(shield.rounded(.up)))", systemImage: "shield.fill")
+                    .foregroundStyle(.cyan)
+            }
+            Text("HP \(Int(health.rounded(.up)))")
+        }
+        .monospacedDigit()
+    }
+}
+
+struct RoundResults: View {
+    let game: Game
+    let winnerID: Int?
+
+    var body: some View {
+        let winner = game.players.first { $0.id == winnerID }
+        VStack(spacing: 10) {
+            Text(winner.map { "\($0.name) takes round \(game.round)!" } ?? "Round \(game.round) is a draw!")
+                .font(.title2.bold())
                 .foregroundStyle(winner?.color ?? .primary)
-            Button("New Game", systemImage: "arrow.clockwise", action: game.newGame)
+            HStack(spacing: 28) {
+                ForEach(game.players) { player in
+                    let earned = game.roundEarnings[player.id] ?? RoundEarnings()
+                    VStack(spacing: 2) {
+                        Text(player.name).font(.headline).foregroundStyle(player.color)
+                        Text("+\(earned.total.formatted(.currency(code: "USD").precision(.fractionLength(0))))")
+                            .font(.title3.monospacedDigit().bold())
+                        Text("damage \(earned.damage.formatted()) · kills \(earned.kills.formatted()) · bonus \(earned.bonus.formatted())")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("\(player.wins) win\(player.wins == 1 ? "" : "s")").font(.caption)
+                    }
+                }
+            }
+            Button(game.round >= game.settings.rounds ? "Final results" : "To the shop", systemImage: "cart", action: game.continueAfterRound)
+                .buttonStyle(.borderedProminent)
+        }
+    }
+}
+
+struct MatchResults: View {
+    let game: Game
+
+    var body: some View {
+        let standings = game.standings
+        VStack(spacing: 10) {
+            if let champion = standings.first {
+                Label("\(champion.name) is the champion!", systemImage: "trophy.fill")
+                    .font(.title2.bold())
+                    .foregroundStyle(champion.color)
+            }
+            ForEach(standings) { player in
+                HStack {
+                    Text(player.name).foregroundStyle(player.color).bold()
+                    Spacer()
+                    Text("\(player.wins) wins · \(player.kills) kills · \(player.money.formatted(.currency(code: "USD").precision(.fractionLength(0))))")
+                        .monospacedDigit()
+                }
+                .frame(maxWidth: 420)
+            }
+            Button("New Match", systemImage: "arrow.clockwise", action: game.newMatch)
                 .buttonStyle(.borderedProminent)
         }
     }

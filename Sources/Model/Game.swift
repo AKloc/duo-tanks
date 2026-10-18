@@ -18,17 +18,22 @@ struct Tank: Identifiable {
     static let bodyHeight = 7.0
     static let hitRadius = 12.0
     static let barrelLength = 16.0
+    static let maxShield = 60.0
 
     let id: Int
     let name: String
     let color: Color
     var position: Vec
     var health = 100.0
+    var shield = 0.0
     var angle: Double
     var power = 55.0
-    var ammo: [Weapon: Int]
+    var inventory: Inventory
     var selectedWeapon = Weapon.babyMissile
     var fallDistance = 0.0
+    var isParachuting = false
+    /// Who last hurt or undermined this tank, so fall damage and kills get credited.
+    var lastAttackerID: Int?
 
     var isAlive: Bool { health > 0 }
     var turretCenter: Vec { position + Vec(0, Tank.bodyHeight) }
@@ -40,7 +45,7 @@ struct Tank: Identifiable {
 
     /// `nil` means unlimited.
     func ammoCount(_ weapon: Weapon) -> Int? {
-        weapon.startingAmmo == nil ? nil : ammo[weapon, default: 0]
+        inventory.count(of: weapon)
     }
 }
 
@@ -55,6 +60,15 @@ struct Projectile: Identifiable {
     var age = 0.0
     var trail: [Vec] = []
     var smokeTimer = 0.0
+    var bouncesLeft = 0
+    /// Set while a Roller is rolling: -1 left, +1 right.
+    var rollDirection: Double?
+    var rollTime = 0.0
+    /// Set while a Sandhog is tunneling: seconds left underground.
+    var burrowTimeLeft: Double?
+    var burrowDistance = 0.0
+
+    var isFlying: Bool { rollDirection == nil && burrowTimeLeft == nil }
 }
 
 struct Explosion: Identifiable {
@@ -80,10 +94,21 @@ struct Smolder {
     var intensity: Double { remaining / duration }
 }
 
+/// Burning napalm fuel that runs downhill.
+struct Flame: Identifiable {
+    let id = UUID()
+    var x: Double
+    var life: Double
+    let ownerID: Int
+    var emitTimer = 0.0
+}
+
 enum Phase: Equatable {
     case aiming
     case firing
-    case gameOver(winnerID: Int?)
+    case roundOver(winnerID: Int?)
+    case shopping(playerIndex: Int)
+    case matchOver
 }
 
 @MainActor
@@ -94,12 +119,20 @@ final class Game {
     nonisolated static let maxWind = 45.0
     nonisolated static let speedPerPower = 6.0
     nonisolated static let fallSpeed = 160.0
+    nonisolated static let parachuteSpeed = 35.0
     /// Power gained per second while the fire button is held.
     nonisolated static let chargeRate = 50.0
+
+    private(set) var settings: MatchSettings
+    private(set) var players: [Player] = []
+    private(set) var round = 0
+    private(set) var roundEarnings: [Int: RoundEarnings] = [:]
 
     private(set) var terrain: Terrain
     private(set) var tanks: [Tank] = []
     private(set) var projectiles: [Projectile] = []
+    private(set) var flames: [Flame] = []
+    private(set) var tracers: [Int: [Vec]] = [:]
     private(set) var explosions: [Explosion] = []
     private(set) var particles: [Particle] = []
     private(set) var floatingTexts: [FloatingText] = []
@@ -114,39 +147,71 @@ final class Game {
 
     @ObservationIgnored private let sound = SoundEngine()
     @ObservationIgnored private let haptics = UIImpactFeedbackGenerator(style: .heavy)
+    @ObservationIgnored private let detents = UISelectionFeedbackGenerator()
     @ObservationIgnored private let rumble = ChargeRumble()
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var chargeStartedAt: ContinuousClock.Instant?
     @ObservationIgnored private var smolders: [Smolder] = []
     @ObservationIgnored private var tankSmokeTimers: [Int: Double] = [:]
+    @ObservationIgnored private var pendingWrecks: [Int] = []
+    @ObservationIgnored private var burnDamage: [Int: Double] = [:]
+    @ObservationIgnored private var burnTextTimer = 0.0
 
     var current: Tank { tanks[currentIndex] }
 
-    init() {
-        terrain = Terrain(width: Int(Game.worldSize.x), maxHeight: Game.worldSize.y)
-        newGame()
+    var standings: [Player] {
+        players.sorted { ($0.wins, $0.money) > ($1.wins, $1.money) }
     }
 
-    func newGame() {
+    init(settings: MatchSettings = MatchSettings()) {
+        self.settings = settings
+        terrain = Terrain(width: Int(Game.worldSize.x), maxHeight: Game.worldSize.y)
+        startMatch(settings)
+    }
+
+    // MARK: Match flow
+
+    func startMatch(_ settings: MatchSettings) {
+        self.settings = settings
+        players = [
+            Player(id: 0, name: "Red", color: .red, money: settings.startingMoney),
+            Player(id: 1, name: "Blue", color: .blue, money: settings.startingMoney),
+        ]
+        round = 0
+        startRound()
+    }
+
+    func newMatch() {
+        startMatch(settings)
+    }
+
+    private func startRound() {
         loop?.cancel()
         loop = nil
+        round += 1
         terrain = Terrain(width: Int(Game.worldSize.x), maxHeight: Game.worldSize.y)
-        let startingAmmo = Dictionary(uniqueKeysWithValues: Weapon.arsenal.compactMap { w in w.startingAmmo.map { (w, $0) } })
-        let players: [(String, Color, ClosedRange<Double>, Double)] = [
-            ("Red", .red, 70...300, 60),
-            ("Blue", .blue, 700...930, 120),
-        ]
-        tanks = players.enumerated().map { index, player in
-            let x = Double.random(in: player.2)
+        let lanes: [ClosedRange<Double>] = [70...300, 700...930]
+        tanks = players.map { player in
+            let x = Double.random(in: lanes[player.id % lanes.count])
             terrain.flatten(around: x, halfWidth: 14)
-            return Tank(id: index, name: player.0, color: player.1, position: Vec(x, terrain.height(at: x)), angle: player.3, ammo: startingAmmo)
+            return Tank(
+                id: player.id, name: player.name, color: player.color,
+                position: Vec(x, terrain.height(at: x)),
+                angle: x < Game.worldSize.x / 2 ? 60 : 120,
+                inventory: player.inventory
+            )
         }
+        roundEarnings = Dictionary(uniqueKeysWithValues: players.map { ($0.id, RoundEarnings()) })
         projectiles = []
+        flames = []
+        tracers = [:]
         explosions = []
         particles = []
         floatingTexts = []
         smolders = []
         tankSmokeTimers = [:]
+        pendingWrecks = []
+        burnDamage = [:]
         chargeStartedAt = nil
         chargePower = nil
         rumble.stop()
@@ -158,7 +223,41 @@ final class Game {
         sound.updateFlights([])
     }
 
-    // MARK: Aiming
+    private func endRound(winnerID: Int?) {
+        for player in players {
+            roundEarnings[player.id, default: RoundEarnings()].bonus += Economy.participation + (player.id == winnerID ? Economy.roundWin : 0)
+        }
+        for i in players.indices {
+            players[i].money += roundEarnings[players[i].id]?.total ?? 0
+            if let tank = tanks.first(where: { $0.id == players[i].id }) {
+                players[i].inventory = tank.inventory
+            }
+            if players[i].id == winnerID { players[i].wins += 1 }
+        }
+        phase = .roundOver(winnerID: winnerID)
+    }
+
+    func continueAfterRound() {
+        guard case .roundOver = phase else { return }
+        phase = round >= settings.rounds ? .matchOver : .shopping(playerIndex: 0)
+    }
+
+    func buy(_ item: ShopItem) {
+        guard case let .shopping(index) = phase, players[index].money >= item.price else { return }
+        players[index].money -= item.price
+        players[index].inventory.add(item, quantity: item.bundle)
+    }
+
+    func finishShopping() {
+        guard case let .shopping(index) = phase else { return }
+        if index + 1 < players.count {
+            phase = .shopping(playerIndex: index + 1)
+        } else {
+            startRound()
+        }
+    }
+
+    // MARK: Aiming and gear
 
     func setAngle(_ angle: Double) {
         guard phase == .aiming else { return }
@@ -166,14 +265,37 @@ final class Game {
     }
 
     /// Hinge opening sets elevation; the barrel keeps facing the side it already faces.
+    /// A light tick every 5° makes the hinge feel like a dial.
     func aimWithHinge(degrees: Double) {
+        guard phase == .aiming else { return }
+        let before = current.angle
         let elevation = min(max(degrees - 80, 0), 90)
-        setAngle(current.angle <= 90 ? elevation : 180 - elevation)
+        setAngle(before <= 90 ? elevation : 180 - elevation)
+        if Int(before / 5) != Int(current.angle / 5) {
+            detents.selectionChanged()
+        }
     }
 
     func select(_ weapon: Weapon) {
         guard phase == .aiming, current.ammoCount(weapon) != 0 else { return }
         tanks[currentIndex].selectedWeapon = weapon
+    }
+
+    func activateShield() {
+        guard phase == .aiming, current.inventory.shields > 0, current.shield <= 0 else { return }
+        tanks[currentIndex].inventory.shields -= 1
+        tanks[currentIndex].shield = Tank.maxShield
+        haptics.impactOccurred(intensity: 0.4)
+    }
+
+    func useRepairKit() {
+        guard phase == .aiming, current.inventory.repairKits > 0, current.health < 100 else { return }
+        let healed = min(35, 100 - current.health)
+        tanks[currentIndex].inventory.repairKits -= 1
+        tanks[currentIndex].health += healed
+        floatingTexts.append(FloatingText(position: current.turretCenter + Vec(0, 26), text: "+\(Int(healed.rounded()))", color: .green))
+        haptics.impactOccurred(intensity: 0.4)
+        startLoop()
     }
 
     func beginCharge() {
@@ -200,23 +322,29 @@ final class Game {
         let weapon = tank.selectedWeapon
         if let count = tank.ammoCount(weapon) {
             guard count > 0 else { return }
-            tank.ammo[weapon] = count - 1
+            tank.inventory.ammo[weapon] = count - 1
             if count == 1 { tank.selectedWeapon = .babyMissile }
         }
         tanks[currentIndex] = tank
 
         let direction = tank.barrelDirection
-        projectiles = [Projectile(
-            position: tank.muzzle,
-            velocity: direction * tank.power * Game.speedPerPower,
-            weapon: weapon,
-            ownerID: tank.id
-        )]
         particles += ParticleFactory.muzzle(at: tank.muzzle, direction: direction)
-        sound.launch(atX: tank.position.x)
         haptics.impactOccurred(intensity: 0.5)
         shake = max(shake, 0.15)
         phase = .firing
+
+        if case .riot = weapon.behavior {
+            let center = tank.muzzle + direction * 14
+            terrain.carve(center: center, radius: weapon.blastRadius, leavesScorch: false)
+            particles += ParticleFactory.dirt(at: center, radius: weapon.blastRadius)
+            sound.dirt(atX: center.x)
+            shake = max(shake, 0.3)
+        } else {
+            var shell = Projectile(position: tank.muzzle, velocity: direction * tank.power * Game.speedPerPower, weapon: weapon, ownerID: tank.id)
+            if case let .bounce(times) = weapon.behavior { shell.bouncesLeft = times }
+            projectiles = [shell]
+            sound.launch(atX: tank.position.x)
+        }
         startLoop()
     }
 
@@ -255,13 +383,14 @@ final class Game {
                 simulate(step)
                 remaining -= step
             }
-            sound.updateFlights(projectiles)
+            updateFlames(dt)
+            sound.updateFlights(projectiles.filter(\.isFlying))
         }
 
         updateEffects(dt)
 
         let isSettling = tanks.contains { $0.position.y > terrain.height(at: $0.position.x) + 0.5 }
-        if phase == .firing, projectiles.isEmpty, explosions.isEmpty, !isSettling {
+        if phase == .firing, projectiles.isEmpty, flames.isEmpty, explosions.isEmpty, !isSettling {
             endTurn()
         }
 
@@ -278,47 +407,98 @@ final class Game {
     private func simulate(_ dt: Double) {
         var next: [Projectile] = []
         for var p in projectiles {
-            p.velocity += Vec(wind, -Game.gravity) * dt
-            p.position += p.velocity * dt
             p.age += dt
-            p.smokeTimer += dt
-            if p.smokeTimer >= 0.035 {
-                p.smokeTimer = 0
-                particles.append(ParticleFactory.shellSmoke(at: p.position))
+            if p.rollDirection != nil {
+                next += roll(&p, dt)
+            } else if p.burrowTimeLeft != nil {
+                next += burrow(&p, dt)
+            } else {
+                next += fly(&p, dt)
             }
-            if p.trail.last.map({ ($0 - p.position).length > 5 }) ?? true {
-                p.trail.append(p.position)
-                if p.trail.count > Projectile.maxTrail { p.trail.removeFirst() }
-            }
-
-            if case let .splitAtApex(count, child) = p.weapon.behavior, p.velocity.y <= 0 {
-                for i in 0..<count {
-                    let spread = (Double(i) - Double(count - 1) / 2) * 22
-                    next.append(Projectile(position: p.position, velocity: Vec(p.velocity.x + spread, p.velocity.y), weapon: child, ownerID: p.ownerID, age: p.age, trail: [p.position]))
-                }
-                particles += (0..<12).map { _ in
-                    Particle(kind: .spark, position: p.position, velocity: Vec(Double.random(in: -80...80), Double.random(in: -80...80)), lifetime: 0.3, size: 1.8, color: .cyan)
-                }
-                continue
-            }
-
-            guard p.position.x >= 0, p.position.x <= Game.worldSize.x else { continue }
-
-            let hitTank = tanks.first { tank in
-                tank.isAlive && (tank.id != p.ownerID || p.age > 0.3) && (tank.turretCenter - p.position).length < Tank.hitRadius
-            }
-            let ground = terrain.height(at: p.position.x)
-            if hitTank != nil || p.position.y <= ground {
-                next += detonate(p.weapon, at: Vec(p.position.x, max(p.position.y, ground)), ownerID: p.ownerID, directHitID: hitTank?.id)
-                continue
-            }
-            next.append(p)
         }
         projectiles = next
         settleTanks(dt)
+        blowUpWrecks()
     }
 
-    private func detonate(_ weapon: Weapon, at center: Vec, ownerID: Int, directHitID: Int?) -> [Projectile] {
+    private func fly(_ p: inout Projectile, _ dt: Double) -> [Projectile] {
+        p.velocity += Vec(wind, -Game.gravity) * dt
+        p.position += p.velocity * dt
+        p.smokeTimer += dt
+        if p.smokeTimer >= 0.035, p.weapon != .tracer {
+            p.smokeTimer = 0
+            particles.append(ParticleFactory.shellSmoke(at: p.position))
+        }
+        if p.trail.last.map({ ($0 - p.position).length > 5 }) ?? true {
+            p.trail.append(p.position)
+            if p.trail.count > Projectile.maxTrail, p.weapon != .tracer { p.trail.removeFirst() }
+        }
+
+        if case let .splitAtApex(count, child) = p.weapon.behavior, p.velocity.y <= 0 {
+            particles += (0..<12).map { _ in
+                Particle(kind: .spark, position: p.position, velocity: Vec(Double.random(in: -80...80), Double.random(in: -80...80)), lifetime: 0.3, size: 1.8, color: .cyan)
+            }
+            return (0..<count).map { i in
+                let spread = (Double(i) - Double(count - 1) / 2) * 22
+                return Projectile(position: p.position, velocity: Vec(p.velocity.x + spread, p.velocity.y), weapon: child, ownerID: p.ownerID, age: p.age, trail: [p.position])
+            }
+        }
+
+        guard p.position.x >= 0, p.position.x <= Game.worldSize.x else { return [] }
+
+        let hit = tankHit(by: p, reach: Tank.hitRadius)
+        let ground = terrain.height(at: p.position.x)
+        guard hit != nil || p.position.y <= ground else { return [p] }
+        return impact(p, at: Vec(p.position.x, max(p.position.y, ground)), directHitID: hit)
+    }
+
+    private func roll(_ p: inout Projectile, _ dt: Double) -> [Projectile] {
+        guard let direction = p.rollDirection else { return [] }
+        p.rollTime += dt
+        let here = terrain.height(at: p.position.x)
+        let nextX = p.position.x + direction * 85 * dt
+        let ahead = terrain.height(at: nextX)
+        let hit = tankHit(by: p, reach: Tank.hitRadius + 2)
+        if hit != nil || nextX < 0 || nextX > Game.worldSize.x || ahead > here + 0.6 || p.rollTime > 5 {
+            explode(p.weapon, at: Vec(p.position.x, here + 2), ownerID: p.ownerID, directHitID: hit)
+            return []
+        }
+        p.position = Vec(nextX, ahead + 2.5)
+        p.velocity = Vec(direction * 85, 0)
+        if Double.random(in: 0...1) < dt * 20 {
+            particles.append(Particle(kind: .debris, position: Vec(p.position.x, ahead + 0.5), velocity: Vec(-direction * 20, Double.random(in: 10...30)),
+                                      lifetime: 0.4, size: 1.2, color: Color(red: 0.4, green: 0.28, blue: 0.15)))
+        }
+        return [p]
+    }
+
+    private func burrow(_ p: inout Projectile, _ dt: Double) -> [Projectile] {
+        guard let timeLeft = p.burrowTimeLeft else { return [] }
+        p.burrowTimeLeft = timeLeft - dt
+        p.position += p.velocity * dt
+        p.burrowDistance += p.velocity.length * dt
+        if p.burrowDistance >= 5 {
+            p.burrowDistance = 0
+            terrain.carve(center: p.position, radius: 7, leavesScorch: false)
+            undermine(around: p.position.x, radius: 14, ownerID: p.ownerID)
+        }
+        let hit = tankHit(by: p, reach: Tank.hitRadius + 4)
+        if hit != nil || timeLeft <= 0 || p.position.x < 0 || p.position.x > Game.worldSize.x || p.position.y < 4 {
+            explode(p.weapon, at: p.position, ownerID: p.ownerID, directHitID: hit)
+            return []
+        }
+        return [p]
+    }
+
+    private func tankHit(by p: Projectile, reach: Double) -> Int? {
+        tanks.first { tank in
+            tank.isAlive && (tank.id != p.ownerID || p.age > 0.3) && (tank.turretCenter - p.position).length < reach
+        }?.id
+    }
+
+    /// What happens when a flying shell meets the ground or a tank.
+    private func impact(_ p: Projectile, at center: Vec, directHitID: Int?) -> [Projectile] {
+        let weapon = p.weapon
         switch weapon.behavior {
         case .dirt:
             terrain.addDirt(center: center, radius: weapon.blastRadius)
@@ -327,22 +507,84 @@ final class Game {
             sound.dirt(atX: center.x)
             shake = max(shake, 0.25)
             return []
+
         case let .scatterOnImpact(count, child):
-            explode(weapon, at: center, directHitID: directHitID)
+            explode(weapon, at: center, ownerID: p.ownerID, directHitID: directHitID)
             return (0..<count).map { _ in
                 let angle = Double.random(in: 0.25...(.pi - 0.25))
                 let speed = Double.random(in: 120...260)
-                return Projectile(position: center + Vec(0, 3), velocity: Vec(cos(angle), sin(angle)) * speed, weapon: child, ownerID: ownerID, age: 1)
+                return Projectile(position: center + Vec(0, 3), velocity: Vec(cos(angle), sin(angle)) * speed, weapon: child, ownerID: p.ownerID, age: 1)
             }
-        case .explode, .splitAtApex:
-            explode(weapon, at: center, directHitID: directHitID)
+
+        case .roll:
+            guard directHitID == nil else {
+                explode(weapon, at: center, ownerID: p.ownerID, directHitID: directHitID)
+                return []
+            }
+            let left = terrain.height(at: center.x - 4), right = terrain.height(at: center.x + 4)
+            var rolling = p
+            rolling.rollDirection = left == right ? (p.velocity.x < 0 ? -1 : 1) : (left < right ? -1 : 1)
+            rolling.position = Vec(center.x, terrain.height(at: center.x) + 2.5)
+            sound.dirt(atX: center.x)
+            return [rolling]
+
+        case .burrow:
+            guard directHitID == nil else {
+                explode(weapon, at: center, ownerID: p.ownerID, directHitID: directHitID)
+                return []
+            }
+            var digger = p
+            let heading = p.velocity / p.velocity.length
+            let dig = Vec(heading.x, min(max(heading.y, -0.5), -0.2))
+            digger.velocity = dig / dig.length * 150
+            digger.burrowTimeLeft = 0.5
+            terrain.carve(center: center, radius: 8, leavesScorch: false)
+            particles += ParticleFactory.dirt(at: center, radius: 20)
+            sound.dirt(atX: center.x)
+            return [digger]
+
+        case .napalm:
+            flames += (0..<9).map { i in
+                Flame(x: center.x + Double(i - 4) * 4.5 + Double.random(in: -1.5...1.5), life: Double.random(in: 3.5...4.5), ownerID: p.ownerID)
+            }
+            explosions.append(Explosion(center: center, radius: 18, isDirt: false))
+            particles += ParticleFactory.explosion(at: center, radius: 14)
+            sound.explosion(atX: center.x, radius: 20)
+            return []
+
+        case .bounce:
+            explode(weapon, at: center, ownerID: p.ownerID, directHitID: directHitID)
+            guard p.bouncesLeft > 0 else { return [] }
+            var hop = Projectile(position: center + Vec(0, 4), velocity: Vec(p.velocity.x * 0.8, abs(p.velocity.y) * 0.6 + 60), weapon: weapon, ownerID: p.ownerID, age: 1)
+            hop.bouncesLeft = p.bouncesLeft - 1
+            return [hop]
+
+        case .tracer:
+            tracers[p.ownerID] = p.trail + [center]
+            return []
+
+        case .explode, .splitAtApex, .riot:
+            explode(weapon, at: center, ownerID: p.ownerID, directHitID: directHitID)
             return []
         }
     }
 
-    private func explode(_ weapon: Weapon, at center: Vec, directHitID: Int?) {
+    private func explode(_ weapon: Weapon, at center: Vec, ownerID: Int, directHitID: Int?) {
         let radius = weapon.blastRadius
         terrain.carve(center: center, radius: radius)
+        blastEffects(at: center, radius: radius)
+        undermine(around: center.x, radius: radius * 1.5, ownerID: ownerID)
+
+        let reach = radius + Tank.hitRadius
+        for i in tanks.indices where tanks[i].isAlive {
+            let distance = tanks[i].id == directHitID ? 0 : (tanks[i].turretCenter - center).length
+            guard distance < reach else { continue }
+            let falloff = distance / reach
+            damage(tankAt: i, by: weapon.damage * (1 - falloff * falloff), attackerID: ownerID)
+        }
+    }
+
+    private func blastEffects(at center: Vec, radius: Double) {
         explosions.append(Explosion(center: center, radius: radius, isDirt: false))
         particles += ParticleFactory.explosion(at: center, radius: radius)
         sound.explosion(atX: center.x, radius: radius)
@@ -351,39 +593,129 @@ final class Game {
         if radius >= 50 { flash = max(flash, min(1, radius / 100)) }
         let smolderTime = 4 + radius / 25
         smolders.append(Smolder(x: center.x, spread: radius * 0.4, duration: smolderTime, remaining: smolderTime))
+    }
 
-        let reach = radius + Tank.hitRadius
-        for i in tanks.indices where tanks[i].isAlive {
-            let distance = tanks[i].id == directHitID ? 0 : (tanks[i].turretCenter - center).length
-            guard distance < reach else { continue }
-            let falloff = distance / reach
-            damage(tankAt: i, by: weapon.damage * (1 - falloff * falloff))
+    /// Credits anyone who knocks the ground out from under a tank for its fall.
+    private func undermine(around x: Double, radius: Double, ownerID: Int) {
+        for i in tanks.indices where tanks[i].id != ownerID && abs(tanks[i].position.x - x) < radius {
+            tanks[i].lastAttackerID = ownerID
         }
     }
 
-    private func damage(tankAt index: Int, by amount: Double) {
-        let applied = min(amount, tanks[index].health)
-        guard applied >= 1 else { return }
+    private func damage(tankAt index: Int, by amount: Double, attackerID: Int?, bypassesShield: Bool = false, showsText: Bool = true) {
+        guard tanks[index].isAlive else { return }
+        var remaining = amount
+        if !bypassesShield, tanks[index].shield > 0 {
+            let absorbed = min(tanks[index].shield, remaining)
+            tanks[index].shield -= absorbed
+            remaining -= absorbed
+            if showsText, absorbed >= 1, remaining < 1 {
+                floatingTexts.append(FloatingText(position: tanks[index].turretCenter + Vec(0, 26), text: "Blocked", color: .cyan))
+            }
+        }
+        let applied = min(remaining, tanks[index].health)
+        guard applied > 0 else { return }
         tanks[index].health -= applied
-        floatingTexts.append(FloatingText(position: tanks[index].turretCenter + Vec(0, 26), text: "-\(Int(applied.rounded()))", color: tanks[index].color))
+        if tanks[index].health < 0.5 { tanks[index].health = 0 }
+
+        let victimID = tanks[index].id
+        if let attackerID, attackerID != victimID {
+            roundEarnings[attackerID, default: RoundEarnings()].damage += Int((applied * Double(Economy.perDamagePoint)).rounded())
+            tanks[index].lastAttackerID = attackerID
+        }
+        if showsText, applied >= 1 {
+            floatingTexts.append(FloatingText(position: tanks[index].turretCenter + Vec(0, 26), text: "-\(Int(applied.rounded()))", color: tanks[index].color))
+        }
+
+        if !tanks[index].isAlive {
+            if let killerID = attackerID ?? tanks[index].lastAttackerID, killerID != victimID {
+                roundEarnings[killerID, default: RoundEarnings()].kills += Economy.perKill
+                if let k = players.firstIndex(where: { $0.id == killerID }) { players[k].kills += 1 }
+            }
+            pendingWrecks.append(index)
+        }
+    }
+
+    /// A destroyed tank cooks off in a small blast of its own.
+    private func blowUpWrecks() {
+        let wrecks = pendingWrecks
+        pendingWrecks = []
+        for index in wrecks {
+            let center = tanks[index].turretCenter
+            terrain.carve(center: center, radius: 14)
+            blastEffects(at: center, radius: 24)
+        }
     }
 
     private func settleTanks(_ dt: Double) {
         for i in tanks.indices {
             let ground = terrain.height(at: tanks[i].position.x)
             if tanks[i].position.y > ground + 0.5 {
-                let drop = min(Game.fallSpeed * dt, tanks[i].position.y - ground)
+                if !tanks[i].isParachuting, tanks[i].isAlive, tanks[i].fallDistance > 10, tanks[i].inventory.parachutes > 0 {
+                    tanks[i].isParachuting = true
+                    tanks[i].inventory.parachutes -= 1
+                }
+                let speed = tanks[i].isParachuting ? Game.parachuteSpeed : Game.fallSpeed
+                let drop = min(speed * dt, tanks[i].position.y - ground)
                 tanks[i].position.y -= drop
                 tanks[i].fallDistance += drop
             } else {
                 tanks[i].position.y = ground
                 if tanks[i].fallDistance > 0 {
-                    if tanks[i].isAlive {
-                        damage(tankAt: i, by: max(0, tanks[i].fallDistance - 6) * 0.5)
+                    if !tanks[i].isParachuting {
+                        damage(tankAt: i, by: max(0, tanks[i].fallDistance - 6) * 0.5, attackerID: tanks[i].lastAttackerID, bypassesShield: true)
                     }
                     tanks[i].fallDistance = 0
+                    tanks[i].isParachuting = false
                 }
             }
+        }
+    }
+
+    private func updateFlames(_ dt: Double) {
+        guard !flames.isEmpty || !burnDamage.isEmpty else { return }
+        for i in flames.indices {
+            flames[i].life -= dt
+            let x = flames[i].x
+            let here = terrain.height(at: x)
+            let left = terrain.height(at: x - 2), right = terrain.height(at: x + 2)
+            if min(left, right) < here - 0.3 {
+                flames[i].x = min(max(x + (left < right ? -1 : 1) * 28 * dt, 0), Game.worldSize.x)
+            }
+            terrain.burnGrass(around: flames[i].x, radius: 5)
+            flames[i].emitTimer += dt
+            if flames[i].emitTimer >= 0.05 {
+                flames[i].emitTimer = 0
+                let base = Vec(flames[i].x + Double.random(in: -2...2), terrain.height(at: flames[i].x) + 1)
+                particles.append(Particle(kind: .fire, position: base, velocity: Vec(wind * 0.2 + Double.random(in: -4...4), Double.random(in: 15...35)),
+                                          lifetime: Double.random(in: 0.4...0.8), size: Double.random(in: 4...8), color: .orange))
+                if Double.random(in: 0...1) < 0.2 {
+                    particles.append(Particle(kind: .smoke, position: base + Vec(0, 6), velocity: Vec(wind * 0.2, Double.random(in: 12...22)),
+                                              lifetime: Double.random(in: 1.2...2), size: Double.random(in: 3...5), color: Color(white: 0.2)))
+                }
+            }
+        }
+
+        for i in tanks.indices where tanks[i].isAlive {
+            let tank = tanks[i]
+            let nearby = flames.filter { abs($0.x - tank.position.x) < 12 && tank.position.y - terrain.height(at: $0.x) < 10 }
+            guard let ownerID = nearby.first?.ownerID else { continue }
+            let amount = (6 + 3 * Double(min(nearby.count, 6))) * dt
+            let before = tanks[i].health
+            damage(tankAt: i, by: amount, attackerID: ownerID, showsText: false)
+            burnDamage[tank.id, default: 0] += before - tanks[i].health
+        }
+        flames.removeAll { $0.life <= 0 }
+
+        burnTextTimer += dt
+        if burnTextTimer >= 0.5 || flames.isEmpty {
+            burnTextTimer = 0
+            for (id, amount) in burnDamage where amount >= 1 {
+                if let tank = tanks.first(where: { $0.id == id }) {
+                    floatingTexts.append(FloatingText(position: tank.turretCenter + Vec(0, 26), text: "-\(Int(amount.rounded()))", color: .orange))
+                }
+            }
+            burnDamage = [:]
         }
     }
 
@@ -468,7 +800,7 @@ final class Game {
         sound.updateFlights([])
         let alive = tanks.filter(\.isAlive)
         if alive.count <= 1 {
-            phase = .gameOver(winnerID: alive.first?.id)
+            endRound(winnerID: alive.first?.id)
             return
         }
         repeat {
@@ -477,6 +809,7 @@ final class Game {
         wind = Game.randomWind()
         phase = .aiming
     }
+
 
     private static func randomWind() -> Double {
         Double.random(in: -maxWind...maxWind).rounded()
