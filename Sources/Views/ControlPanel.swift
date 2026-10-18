@@ -12,6 +12,14 @@ struct ControlPanel: View {
                 RoundResults(game: game, winnerID: winnerID)
             case .matchOver:
                 MatchResults(game: game, onQuit: onQuit)
+            case .killCam:
+                VStack(spacing: 10) {
+                    Label("Kill cam", systemImage: "video.fill")
+                        .font(.title2.bold())
+                        .foregroundStyle(.red)
+                    Button("Skip", systemImage: "forward.fill", action: game.skipKillCam)
+                        .buttonStyle(.bordered)
+                }
             default:
                 controls(for: game.current)
             }

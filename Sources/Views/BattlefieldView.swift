@@ -22,6 +22,9 @@ struct BattlefieldView: View {
         let wind = game.wind
         let shake = game.shake
         let flash = game.flash
+        let turrets = game.turrets
+        let camera = game.camera
+        let isKillCam = game.phase == .killCam
         let currentID = game.phase == .aiming ? game.current.id : nil
         let theme = game.theme
         let look = ThemeLook.for(theme)
@@ -29,7 +32,7 @@ struct BattlefieldView: View {
         let soil = soils[theme]
 
         GeometryReader { proxy in
-            let mapper = WorldMapper(size: proxy.size)
+            let mapper = WorldMapper(size: proxy.size, camera: camera)
             TimelineView(.animation) { timeline in
                 let time = timeline.date.timeIntervalSinceReferenceDate
                 let blasts = explosions.map { e in
@@ -43,7 +46,10 @@ struct BattlefieldView: View {
                     drawTracers(tracers, tanks: tanks, in: &context, mapper: mapper)
                     drawFlames(flames, terrain: terrain, in: &context, mapper: mapper, time: time)
                     for tank in tanks {
-                        drawTank(tank, isCurrent: tank.id == currentID, in: &context, mapper: mapper, time: time)
+                        drawTank(tank, terrain: terrain, isCurrent: tank.id == currentID, in: &context, mapper: mapper, time: time)
+                    }
+                    for turret in turrets {
+                        drawFlyingTurret(turret, in: &context, mapper: mapper)
                     }
                     drawParticles(particles, kinds: [.smoke], in: &context, mapper: mapper)
                     for explosion in explosions {
@@ -58,7 +64,11 @@ struct BattlefieldView: View {
                     }
                     drawPrecipitation(in: &context, size: size, time: time)
                     drawVignette(in: &context, size: size)
-                    drawWind(wind, in: &context, size: size)
+                    if isKillCam {
+                        drawKillCamFrame(in: &context, size: size)
+                    } else {
+                        drawWind(wind, in: &context, size: size)
+                    }
                     if ambience.lightningFlash > 0.01 {
                         context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(red: 0.85, green: 0.9, blue: 1).opacity(ambience.lightningFlash * 0.35)))
                     }
@@ -451,17 +461,27 @@ struct BattlefieldView: View {
 
     // MARK: Actors
 
-    private func drawTank(_ tank: Tank, isCurrent: Bool, in context: inout GraphicsContext, mapper: WorldMapper, time: Double) {
+    private func drawTank(_ tank: Tank, terrain: Terrain, isCurrent: Bool, in context: inout GraphicsContext, mapper: WorldMapper, time: Double) {
         let s = mapper.scale
-        let base = mapper.screen(tank.position)
-        let turret = mapper.screen(tank.turretCenter)
+        let ground = mapper.screen(tank.position)
+        let slope = atan((terrain.height(at: tank.position.x + 8) - terrain.height(at: tank.position.x - 8)) / 16)
+        let lean = min(max(slope, -0.6), 0.6) + tank.tilt
+        let base = CGPoint(x: ground.x, y: ground.y - tank.hop * s)
         let facing: Double = tank.angle <= 90 ? 1 : -1
-        let paint = tank.isAlive ? tank.color.mix(with: Color(red: 0.32, green: 0.33, blue: 0.27), by: 0.45) : Color(white: 0.16)
+        let paint = tank.isAlive ? tank.color.mix(with: Color(red: 0.32, green: 0.33, blue: 0.27), by: 0.45) : Color(red: 0.34, green: 0.29, blue: 0.25)
         let light = paint.mix(with: .white, by: 0.3)
         let dark = paint.mix(with: .black, by: 0.55)
-        func p(_ dx: Double, _ dy: Double) -> CGPoint { CGPoint(x: base.x + dx * facing * s, y: base.y - dy * s) }
 
-        context.fill(Path(ellipseIn: CGRect(x: base.x - 17 * s, y: base.y - 2 * s, width: 34 * s, height: 5 * s)), with: .color(.black.opacity(0.45)))
+        /// Screen rotation of the hull: world counter-clockwise is screen negative.
+        let turn = -lean
+        func rotated(_ v: CGPoint, by angle: Double) -> CGPoint {
+            CGPoint(x: v.x * cos(angle) - v.y * sin(angle), y: v.x * sin(angle) + v.y * cos(angle))
+        }
+        let turretOffset = rotated(CGPoint(x: 0, y: -Tank.bodyHeight * s), by: turn)
+        let turret = CGPoint(x: base.x + turretOffset.x, y: base.y + turretOffset.y)
+
+        let shadowWidth = 34 * s / (1 + tank.hop * 0.05)
+        context.fill(Path(ellipseIn: CGRect(x: ground.x - shadowWidth / 2, y: ground.y - 2 * s, width: shadowWidth, height: 5 * s)), with: .color(.black.opacity(0.45)))
 
         if isCurrent {
             let glow = 30 * s
@@ -469,17 +489,27 @@ struct BattlefieldView: View {
                          with: .radialGradient(Gradient(colors: [tank.color.opacity(0.3), .clear]), center: turret, startRadius: 0, endRadius: glow))
         }
 
-        let muzzle = mapper.screen(tank.muzzle)
-        var barrel = Path()
-        barrel.move(to: turret)
-        barrel.addLine(to: muzzle)
-        context.stroke(barrel, with: .color(dark), style: StrokeStyle(lineWidth: 3.2 * s, lineCap: .butt))
-        context.stroke(barrel, with: .color(light.opacity(0.6)), style: StrokeStyle(lineWidth: 1 * s, lineCap: .butt))
-        let brake = tank.barrelDirection
-        var muzzleBrake = Path()
-        muzzleBrake.move(to: mapper.screen(tank.muzzle - brake * 2.5))
-        muzzleBrake.addLine(to: muzzle)
-        context.stroke(muzzleBrake, with: .color(dark), style: StrokeStyle(lineWidth: 4.6 * s, lineCap: .butt))
+        var body = context
+        body.translateBy(x: base.x, y: base.y)
+        body.rotate(by: .radians(turn))
+        func p(_ dx: Double, _ dy: Double) -> CGPoint { CGPoint(x: dx * facing * s, y: -dy * s) }
+        let localTurret = CGPoint(x: 0, y: -Tank.bodyHeight * s)
+
+        if tank.hasTurret {
+            // Keep the barrel on the real aim angle while the hull rocks.
+            let aim = tank.angle * .pi / 180
+            let reach = rotated(CGPoint(x: cos(aim) * Tank.barrelLength * s, y: -sin(aim) * Tank.barrelLength * s), by: -turn)
+            let muzzle = CGPoint(x: localTurret.x + reach.x, y: localTurret.y + reach.y)
+            var barrel = Path()
+            barrel.move(to: localTurret)
+            barrel.addLine(to: muzzle)
+            body.stroke(barrel, with: .color(dark), style: StrokeStyle(lineWidth: 3.2 * s, lineCap: .butt))
+            body.stroke(barrel, with: .color(light.opacity(0.6)), style: StrokeStyle(lineWidth: 1 * s, lineCap: .butt))
+            var muzzleBrake = Path()
+            muzzleBrake.move(to: CGPoint(x: muzzle.x - reach.x * 0.16, y: muzzle.y - reach.y * 0.16))
+            muzzleBrake.addLine(to: muzzle)
+            body.stroke(muzzleBrake, with: .color(dark), style: StrokeStyle(lineWidth: 4.6 * s, lineCap: .butt))
+        }
 
         var hull = Path()
         hull.move(to: p(-14, 4))
@@ -488,54 +518,88 @@ struct BattlefieldView: View {
         hull.addLine(to: p(14.5, 5))
         hull.addLine(to: p(14, 4))
         hull.closeSubpath()
-        context.fill(hull, with: .linearGradient(Gradient(colors: [light, paint, dark]), startPoint: p(0, 9.5), endPoint: p(0, 4)))
+        body.fill(hull, with: .linearGradient(Gradient(colors: [light, paint, dark]), startPoint: p(0, 9.5), endPoint: p(0, 4)))
         var deck = Path()
         deck.move(to: p(-12, 9.5))
         deck.addLine(to: p(9, 9.5))
-        context.stroke(deck, with: .color(.white.opacity(0.35)), lineWidth: 0.8 * s)
+        body.stroke(deck, with: .color(.white.opacity(0.35)), lineWidth: 0.8 * s)
 
-        let track = CGRect(x: base.x - 15 * s, y: base.y - 5 * s, width: 30 * s, height: 5 * s)
-        context.fill(Path(roundedRect: track, cornerRadius: 2.5 * s), with: .color(Color(white: 0.1)))
-        context.stroke(Path(roundedRect: track.insetBy(dx: 0.5 * s, dy: 0.5 * s), cornerRadius: 2.2 * s),
-                       with: .color(Color(white: 0.4).opacity(0.5)), style: StrokeStyle(lineWidth: 0.8 * s, dash: [1.1 * s, 1.1 * s]))
+        let track = CGRect(x: -15 * s, y: -5 * s, width: 30 * s, height: 5 * s)
+        body.fill(Path(roundedRect: track, cornerRadius: 2.5 * s), with: .color(Color(white: 0.1)))
+        body.stroke(Path(roundedRect: track.insetBy(dx: 0.5 * s, dy: 0.5 * s), cornerRadius: 2.2 * s),
+                    with: .color(Color(white: 0.4).opacity(0.5)), style: StrokeStyle(lineWidth: 0.8 * s, dash: [1.1 * s, 1.1 * s]))
         for i in 0..<6 {
             let wheel = CGPoint(x: track.minX + (3 + Double(i) * 4.8) * s, y: track.midY)
             let r = 1.9 * s
-            context.fill(Path(ellipseIn: CGRect(x: wheel.x - r, y: wheel.y - r, width: r * 2, height: r * 2)),
-                         with: .radialGradient(Gradient(colors: [Color(white: 0.55), Color(white: 0.25)]), center: wheel, startRadius: 0, endRadius: r))
+            body.fill(Path(ellipseIn: CGRect(x: wheel.x - r, y: wheel.y - r, width: r * 2, height: r * 2)),
+                      with: .radialGradient(Gradient(colors: [Color(white: 0.55), Color(white: 0.25)]), center: wheel, startRadius: 0, endRadius: r))
         }
 
-        let dome = CGRect(x: turret.x - 7 * s, y: turret.y - 5 * s, width: 14 * s, height: 8 * s)
-        context.fill(Path(roundedRect: dome, cornerRadius: 4 * s), with: .linearGradient(
-            Gradient(colors: [light, paint, dark]), startPoint: CGPoint(x: dome.midX, y: dome.minY), endPoint: CGPoint(x: dome.midX, y: dome.maxY)))
-        context.fill(Path(ellipseIn: CGRect(x: turret.x - (2 + 2.5 * facing) * s, y: turret.y - 6 * s, width: 4 * s, height: 1.8 * s)), with: .color(dark))
-        var antenna = Path()
-        antenna.move(to: CGPoint(x: turret.x - 5 * facing * s, y: turret.y - 4 * s))
-        antenna.addLine(to: CGPoint(x: turret.x - 7 * facing * s, y: turret.y - 15 * s))
-        context.stroke(antenna, with: .color(Color(white: 0.2)), lineWidth: 0.6 * s)
+        if tank.hasTurret {
+            let dome = CGRect(x: -7 * s, y: localTurret.y - 5 * s, width: 14 * s, height: 8 * s)
+            body.fill(Path(roundedRect: dome, cornerRadius: 4 * s), with: .linearGradient(
+                Gradient(colors: [light, paint, dark]), startPoint: CGPoint(x: dome.midX, y: dome.minY), endPoint: CGPoint(x: dome.midX, y: dome.maxY)))
+            body.fill(Path(ellipseIn: CGRect(x: -(2 + 2.5 * facing) * s, y: localTurret.y - 6 * s, width: 4 * s, height: 1.8 * s)), with: .color(dark))
+            var antenna = Path()
+            antenna.move(to: CGPoint(x: -5 * facing * s, y: localTurret.y - 4 * s))
+            antenna.addLine(to: CGPoint(x: -7 * facing * s, y: localTurret.y - 15 * s))
+            body.stroke(antenna, with: .color(Color(white: 0.2)), lineWidth: 0.6 * s)
+        }
 
         if tank.isParachuting {
             drawParachute(above: turret, scale: s, in: &context)
         }
 
-        guard tank.isAlive else { return }
+        guard tank.isAlive else {
+            var embers = context
+            embers.blendMode = .plusLighter
+            let glow = (10 + sin(time * 5 + tank.position.x) * 1.5) * s
+            embers.fill(Path(ellipseIn: CGRect(x: base.x - glow, y: base.y - 6 * s - glow * 0.6, width: glow * 2, height: glow * 1.2)),
+                        with: .radialGradient(Gradient(colors: [.orange.opacity(0.45), .red.opacity(0.15), .clear]),
+                                              center: CGPoint(x: base.x, y: base.y - 6 * s), startRadius: 0, endRadius: glow))
+            return
+        }
         if tank.shield > 0 {
             drawShield(around: turret, strength: tank.shield / Tank.maxShield, scale: s, time: time, in: &context)
         }
-        let bar = CGRect(x: base.x - 14 * s, y: turret.y - 24 * s, width: 28 * s, height: 3.5 * s)
+        let bar = CGRect(x: ground.x - 14 * s, y: turret.y - 24 * s, width: 28 * s, height: 3.5 * s)
         context.fill(Path(roundedRect: bar, cornerRadius: 1.5 * s), with: .color(.black.opacity(0.55)))
         context.fill(Path(roundedRect: CGRect(x: bar.minX, y: bar.minY, width: bar.width * tank.health / 100, height: bar.height), cornerRadius: 1.5 * s),
                      with: .color(tank.health > 60 ? .green : tank.health > 30 ? .yellow : .red))
 
         if isCurrent {
             var marker = Path()
-            let tip = CGPoint(x: base.x, y: bar.minY - 3 * s)
+            let tip = CGPoint(x: ground.x, y: bar.minY - 3 * s)
             marker.move(to: tip)
             marker.addLine(to: CGPoint(x: tip.x - 5 * s, y: tip.y - 7 * s))
             marker.addLine(to: CGPoint(x: tip.x + 5 * s, y: tip.y - 7 * s))
             marker.closeSubpath()
             context.fill(marker, with: .color(.yellow))
         }
+    }
+
+    private func drawFlyingTurret(_ turret: FlyingTurret, in context: inout GraphicsContext, mapper: WorldMapper) {
+        let s = mapper.scale
+        let center = mapper.screen(turret.position)
+        let charred = turret.color.mix(with: Color(red: 0.3, green: 0.26, blue: 0.22), by: 0.6)
+        var piece = context
+        piece.translateBy(x: center.x, y: center.y)
+        piece.rotate(by: .radians(-turret.angle))
+        var barrel = Path()
+        barrel.move(to: .zero)
+        barrel.addLine(to: CGPoint(x: Tank.barrelLength * s, y: 0))
+        piece.stroke(barrel, with: .color(Color(white: 0.32)), style: StrokeStyle(lineWidth: 3 * s, lineCap: .butt))
+        piece.fill(Path(roundedRect: CGRect(x: -7 * s, y: -5 * s, width: 14 * s, height: 8 * s), cornerRadius: 4 * s), with: .color(charred))
+    }
+
+    private func drawKillCamFrame(in context: inout GraphicsContext, size: CGSize) {
+        let bar = size.height * 0.1
+        context.fill(Path(CGRect(x: 0, y: 0, width: size.width, height: bar)), with: .color(.black))
+        context.fill(Path(CGRect(x: 0, y: size.height - bar, width: size.width, height: bar)), with: .color(.black))
+        let label = Text("● KILL CAM")
+            .font(.system(size: max(11, bar * 0.45), weight: .heavy, design: .rounded))
+            .foregroundStyle(.red)
+        context.draw(label, at: CGPoint(x: 16, y: bar / 2), anchor: .leading)
     }
 
     private func drawParachute(above turret: CGPoint, scale s: Double, in context: inout GraphicsContext) {
@@ -732,9 +796,17 @@ struct WorldMapper {
     let scale: Double
     let origin: CGPoint
 
-    init(size: CGSize) {
-        scale = size.width / Game.worldSize.x
-        origin = CGPoint(x: 0, y: size.height)
+    init(size: CGSize, camera: Camera? = nil) {
+        let fit = size.width / Game.worldSize.x
+        guard let camera else {
+            scale = fit
+            origin = CGPoint(x: 0, y: size.height)
+            return
+        }
+        scale = fit * camera.zoom
+        // Never show below the bottom of the world.
+        let centerY = max(camera.center.y, size.height / 2 / scale)
+        origin = CGPoint(x: size.width / 2 - camera.center.x * scale, y: size.height / 2 + centerY * scale)
     }
 
     func screen(_ p: Vec) -> CGPoint {

@@ -51,7 +51,11 @@ You earn **$40 per point of damage** to opponents, **$2,500 per kill** (includin
 | Shield | $8,000 | A bubble that absorbs 60 damage (raise it on your turn) |
 | Repair Kit | $4,000 | Restores 35 health on your turn |
 
-Tanks that lose the ground under them fall and take damage, and destroyed tanks cook off in a small blast.
+Tanks that lose the ground under them fall and take damage. Blasts rock nearby tanks and bounce them on their tracks, tanks sit tilted on slopes, and destroyed tanks cook off and throw their turrets.
+
+## Kill cam
+
+The shot that ends a round plays again in slow motion: the camera rides along with the shell, drops into bullet time as it reaches the victim, and holds on the wreck. Because the simulation is deterministic, the replay is the exact same shot. Tap Skip to move on.
 
 ## Playing the computer
 

@@ -72,6 +72,23 @@ struct GameplayTests {
         #expect(game.players[0].kills == 1)
     }
 
+    @Test func aKillReplaysInTheKillCamWithoutPayingTwice() throws {
+        let game = makeGame()
+        game.setHealth(30, ofTank: 1)
+        let aim = try aimAtOpponent(in: game)
+        game.fireForTesting(weapon: .funkyBomb, angle: aim.angle, power: aim.power)
+        var sawKillCam = false
+        for _ in 0..<6_000 where game.phase == .firing || game.phase == .killCam {
+            game.stepForTesting()
+            if game.phase == .killCam { sawKillCam = true }
+        }
+        #expect(sawKillCam)
+        #expect(game.phase == .roundOver(winnerID: 0))
+        #expect(game.tanks[1].health == 0, "the replay plays out the same, scattered bomblets and all")
+        #expect(game.players[0].kills == 1)
+        #expect(game.camera == nil)
+    }
+
     @Test func theShopChargesAndStocksItems() throws {
         let game = makeGame()
         game.setHealth(1, ofTank: 1)

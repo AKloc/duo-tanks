@@ -34,6 +34,15 @@ struct Tank: Identifiable {
     var isParachuting = false
     /// Who last hurt or undermined this tank, so fall damage and kills get credited.
     var lastAttackerID: Int?
+    /// Rocking from nearby blasts (radians), settling on a spring. Visual only.
+    var tilt = 0.0
+    var tiltVelocity = 0.0
+    /// Height of a blast-induced hop above the ground. Visual only.
+    var hop = 0.0
+    var hopVelocity = 0.0
+    var hasTurret = true
+
+    var isRocking: Bool { abs(tilt) > 0.002 || abs(tiltVelocity) > 0.01 || hop > 0.01 || hopVelocity > 0.01 }
 
     var isAlive: Bool { health > 0 }
     var turretCenter: Vec { position + Vec(0, Tank.bodyHeight) }
@@ -103,9 +112,42 @@ struct Flame: Identifiable {
     var emitTimer = 0.0
 }
 
+/// A turret blown off a destroyed tank, tumbling until it comes to rest.
+struct FlyingTurret: Identifiable {
+    let id = UUID()
+    var position: Vec
+    var velocity: Vec
+    var angle: Double
+    var spin: Double
+    let color: Color
+    var isResting = false
+}
+
+struct Camera: Equatable {
+    var center: Vec
+    var zoom: Double
+
+    /// The whole battlefield; a center height of 0 means "as low as the view allows".
+    static let overview = Camera(center: Vec(Game.worldSize.x / 2, 0), zoom: 1)
+}
+
+/// Everything needed to play the last shot again exactly.
+private struct ShotSnapshot {
+    let terrain: Terrain
+    let tanks: [Tank]
+    let wind: Double
+    let shooterIndex: Int
+    let weapon: Weapon
+    let seed: UInt64
+    let roundEarnings: [Int: RoundEarnings]
+    let players: [Player]
+}
+
 enum Phase: Equatable {
     case aiming
     case firing
+    /// Slow-motion replay of the shot that ended the round.
+    case killCam
     case roundOver(winnerID: Int?)
     case shopping(playerIndex: Int)
     case matchOver
@@ -151,6 +193,11 @@ final class Game {
     /// 0...1, decays after each blast.
     private(set) var shake = 0.0
     private(set) var flash = 0.0
+    private(set) var turrets: [FlyingTurret] = []
+    /// `nil` shows the whole battlefield.
+    private(set) var camera: Camera?
+    /// Playback speed of the simulation; slowed during the kill cam.
+    private(set) var timeScale = 1.0
     /// What the computer is doing on its turn, for the control panel.
     private(set) var computerStatus: String?
 
@@ -171,6 +218,12 @@ final class Game {
     @ObservationIgnored private var rng = SeededRandom(seed: 1)
     /// Where the most recent blast went off.
     @ObservationIgnored private(set) var lastImpact: Vec?
+    @ObservationIgnored private var lastShot: ShotSnapshot?
+    @ObservationIgnored private var victimsThisShot: [Int] = []
+    @ObservationIgnored private var finalOutcome: (earnings: [Int: RoundEarnings], players: [Player])?
+    @ObservationIgnored private var killCamHold = 0.0
+    @ObservationIgnored private var killCamImpactTime: Double?
+    @ObservationIgnored private var killCamVictimID: Int?
 
     var current: Tank { tanks[currentIndex] }
 
@@ -255,6 +308,11 @@ final class Game {
         explosions = []
         particles = []
         floatingTexts = []
+        turrets = []
+        camera = nil
+        timeScale = 1
+        lastShot = nil
+        finalOutcome = nil
         smolders = []
         tankSmokeTimers = [:]
         pendingWrecks = []
@@ -270,6 +328,7 @@ final class Game {
         sound.updateFlights([])
         scheduleComputerTurn()
     }
+
 
 
     private func scheduleComputerTurn() {
@@ -394,13 +453,23 @@ final class Game {
         }
         tanks[currentIndex] = tank
 
+        let seed = UInt64.random(in: 1...UInt64.max)
+        lastShot = ShotSnapshot(terrain: terrain, tanks: tanks, wind: wind, shooterIndex: currentIndex, weapon: weapon,
+                                seed: seed, roundEarnings: roundEarnings, players: players)
+        victimsThisShot = []
+        phase = .firing
+        launch(weapon, from: tank, seed: seed)
+        startLoop()
+    }
+
+    /// Sends the shot on its way. Shared by real shots and kill cam replays.
+    private func launch(_ weapon: Weapon, from tank: Tank, seed: UInt64) {
         let direction = tank.barrelDirection
         particles += ParticleFactory.muzzle(at: tank.muzzle, direction: direction)
         buzz(0.5)
         shake = max(shake, 0.15)
-        phase = .firing
         accumulator = 0
-        rng = SeededRandom(seed: UInt64.random(in: 1...UInt64.max))
+        rng = SeededRandom(seed: seed)
 
         if case .riot = weapon.behavior {
             let center = tank.muzzle + direction * 14
@@ -414,7 +483,77 @@ final class Game {
             projectiles = [shell]
             sound.launch(atX: tank.position.x)
         }
-        startLoop()
+    }
+
+    // MARK: Kill cam
+
+    private func startKillCam() -> Bool {
+        guard let shot = lastShot, !victimsThisShot.isEmpty else { return false }
+        finalOutcome = (roundEarnings, players)
+        killCamVictimID = victimsThisShot.last
+        terrain = shot.terrain
+        tanks = shot.tanks
+        wind = shot.wind
+        currentIndex = shot.shooterIndex
+        projectiles = []
+        flames = []
+        explosions = []
+        particles = []
+        floatingTexts = []
+        smolders = []
+        turrets = []
+        pendingWrecks = []
+        victimsThisShot = []
+        killCamHold = 1.8
+        killCamImpactTime = nil
+        camera = .overview
+        timeScale = 0.4
+        phase = .killCam
+        launch(shot.weapon, from: tanks[shot.shooterIndex], seed: shot.seed)
+        return true
+    }
+
+    func skipKillCam() {
+        guard phase == .killCam else { return }
+        finishKillCam()
+    }
+
+    private func finishKillCam() {
+        if let outcome = finalOutcome {
+            roundEarnings = outcome.earnings
+            players = outcome.players
+        }
+        finalOutcome = nil
+        camera = nil
+        timeScale = 1
+        projectiles = []
+        flames = []
+        sound.updateFlights([])
+        let alive = tanks.filter(\.isAlive)
+        endRound(winnerID: alive.first?.id)
+    }
+
+    /// Follows the shell, slows to bullet time near the victim, then holds on the wreck.
+    private func updateKillCam(_ dt: Double) {
+        guard phase == .killCam, let victim = tanks.first(where: { $0.id == killCamVictimID }) else { return }
+        var target = Camera(center: victim.turretCenter, zoom: 3.2)
+        var speed = 0.4
+        if let shell = projectiles.min(by: { ($0.position - victim.turretCenter).length < ($1.position - victim.turretCenter).length }) {
+            let distance = (shell.position - victim.turretCenter).length
+            target = Camera(center: shell.position, zoom: distance < 140 ? 2.6 : 1.8)
+            speed = distance < 80 ? 0.12 : 0.4
+        } else if lastImpact != nil {
+            killCamImpactTime = (killCamImpactTime ?? 0) + dt
+            speed = (killCamImpactTime ?? 0) < 0.8 ? 0.2 : 0.6
+        }
+        timeScale += (speed - timeScale) * min(1, dt * 6)
+        var view = camera ?? .overview
+        let ease = min(1, dt * 3.5)
+        view.center += (target.center - view.center) * ease
+        view.zoom += (target.zoom - view.zoom) * ease
+        let halfWidth = Game.worldSize.x / (2 * view.zoom)
+        view.center.x = min(max(view.center.x, halfWidth), Game.worldSize.x - halfWidth)
+        camera = view
     }
 
     // MARK: Simulation
@@ -445,8 +584,9 @@ final class Game {
             rumble.update(fraction: power / 100)
         }
 
-        if phase == .firing {
-            accumulator += dt
+        updateKillCam(dt)
+        if phase == .firing || phase == .killCam {
+            accumulator += dt * timeScale
             while accumulator >= Game.stepDuration {
                 simulate(Game.stepDuration)
                 updateFlames(Game.stepDuration)
@@ -455,16 +595,21 @@ final class Game {
             sound.updateFlights(projectiles.filter(\.isFlying))
         }
 
-        updateEffects(dt)
+        updateEffects(dt * timeScale)
 
         // A falling tank counts until its landing (and any fall damage) has been processed.
         let isSettling = tanks.contains { $0.fallDistance > 0 || $0.position.y > terrain.height(at: $0.position.x) + 0.5 }
-        if phase == .firing, projectiles.isEmpty, flames.isEmpty, explosions.isEmpty, !isSettling {
+        let isSettled = projectiles.isEmpty && flames.isEmpty && explosions.isEmpty && !isSettling
+        if phase == .firing, isSettled {
             endTurn()
+        } else if phase == .killCam, isSettled {
+            killCamHold -= dt
+            if killCamHold <= 0 { finishKillCam() }
         }
 
         let isSmoking = !smolders.isEmpty || tanks.contains { $0.health < 50 }
-        let isAnimating = isSmoking || !particles.isEmpty || !floatingTexts.isEmpty || !explosions.isEmpty || shake > 0.01 || flash > 0.01
+        let isMoving = tanks.contains(where: \.isRocking) || turrets.contains { !$0.isResting }
+        let isAnimating = isSmoking || isMoving || phase == .killCam || !particles.isEmpty || !floatingTexts.isEmpty || !explosions.isEmpty || shake > 0.01 || flash > 0.01
         if !isAnimating && phase != .firing && chargeStartedAt == nil {
             shake = 0
             flash = 0
@@ -646,11 +791,25 @@ final class Game {
         undermine(around: center.x, radius: radius * 1.5, ownerID: ownerID)
 
         let reach = radius + Tank.hitRadius
+        rock(tanksNear: center, reach: reach * 2, strength: weapon.damage / 60 + radius / 40)
         for i in tanks.indices where tanks[i].isAlive {
             let distance = tanks[i].id == directHitID ? 0 : (tanks[i].turretCenter - center).length
             guard distance < reach else { continue }
             let falloff = distance / reach
             damage(tankAt: i, by: weapon.damage * (1 - falloff * falloff), attackerID: ownerID)
+        }
+    }
+
+    /// Knocks nearby tanks into a rock and a hop, away from the blast.
+    private func rock(tanksNear center: Vec, reach: Double, strength: Double) {
+        for i in tanks.indices {
+            let offset = tanks[i].turretCenter - center
+            let distance = offset.length
+            guard distance < reach else { continue }
+            let push = (1 - distance / reach) * strength
+            let side: Double = offset.x == 0 ? 1 : (offset.x > 0 ? 1 : -1)
+            tanks[i].tiltVelocity -= side * push * 5
+            tanks[i].hopVelocity += push * 70
         }
     }
 
@@ -703,6 +862,7 @@ final class Game {
                 if let k = players.firstIndex(where: { $0.id == killerID }) { players[k].kills += 1 }
             }
             pendingWrecks.append(index)
+            if phase == .firing { victimsThisShot.append(victimID) }
         }
     }
 
@@ -714,6 +874,13 @@ final class Game {
             let center = tanks[index].turretCenter
             terrain.carve(center: center, radius: 14)
             blastEffects(at: center, radius: 24)
+            tanks[index].hasTurret = false
+            tanks[index].hopVelocity += 90
+            tanks[index].tiltVelocity += Double.random(in: -6...6)
+            turrets.append(FlyingTurret(
+                position: center, velocity: Vec(Double.random(in: -70...70), Double.random(in: 170...240)),
+                angle: tanks[index].angle * .pi / 180, spin: Double.random(in: -12...12), color: tanks[index].color
+            ))
         }
     }
 
@@ -821,9 +988,36 @@ final class Game {
         if particles.count > 900 { particles.removeFirst(particles.count - 900) }
 
         emitLingeringSmoke(dt)
+        updateTankMotion(dt)
 
         shake *= exp(-5 * dt)
         flash *= exp(-6 * dt)
+    }
+
+    private func updateTankMotion(_ dt: Double) {
+        for i in tanks.indices where tanks[i].isRocking {
+            let springForce = -55 * tanks[i].tilt - 6 * tanks[i].tiltVelocity
+            tanks[i].tiltVelocity += springForce * dt
+            tanks[i].tilt = min(max(tanks[i].tilt + tanks[i].tiltVelocity * dt, -1.1), 1.1)
+            tanks[i].hopVelocity -= gravity * dt
+            tanks[i].hop += tanks[i].hopVelocity * dt
+            if tanks[i].hop <= 0 {
+                tanks[i].hop = 0
+                tanks[i].hopVelocity = tanks[i].hopVelocity < -30 ? -tanks[i].hopVelocity * 0.3 : 0
+            }
+        }
+        for i in turrets.indices where !turrets[i].isResting {
+            turrets[i].velocity.y -= gravity * dt
+            turrets[i].position += turrets[i].velocity * dt
+            turrets[i].angle += turrets[i].spin * dt
+            let ground = terrain.height(at: turrets[i].position.x) + 2
+            if turrets[i].position.y <= ground {
+                turrets[i].position.y = ground
+                turrets[i].velocity = Vec(turrets[i].velocity.x * 0.55, -turrets[i].velocity.y * 0.35)
+                turrets[i].spin *= 0.5
+                if turrets[i].velocity.length < 18 { turrets[i].isResting = true }
+            }
+        }
     }
 
     private func emitLingeringSmoke(_ dt: Double) {
@@ -870,7 +1064,7 @@ final class Game {
         sound.updateFlights([])
         let alive = tanks.filter(\.isAlive)
         if alive.count <= 1 {
-            endRound(winnerID: alive.first?.id)
+            if !startKillCam() { endRound(winnerID: alive.first?.id) }
             return
         }
         repeat {
@@ -937,12 +1131,18 @@ extension Game {
         loop = nil
     }
 
+    func stepForTesting() {
+        loop?.cancel()
+        loop = nil
+        _ = advance(by: 1.0 / 60)
+    }
+
     /// Steps the game in 60 Hz frames until the shot and everything it set off has settled.
     func runUntilSettled(maxSeconds: Double = 60) {
         loop?.cancel()
         loop = nil
         var elapsed = 0.0
-        while phase == .firing, elapsed < maxSeconds {
+        while phase == .firing || phase == .killCam, elapsed < maxSeconds {
             _ = advance(by: 1.0 / 60)
             elapsed += 1.0 / 60
         }
