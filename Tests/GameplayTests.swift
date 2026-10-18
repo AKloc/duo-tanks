@@ -52,8 +52,8 @@ struct GameplayTests {
         let aim = try aimAtOpponent(in: game)
         game.fireForTesting(weapon: .babyMissile, angle: aim.angle, power: aim.power)
         game.runUntilSettled()
-        // 60 from the hit, plus a point or two from dropping into the crater.
-        #expect((57...61).contains(100 - game.tanks[1].health))
+        // 60 from the hit, plus a few points from dropping into the crater.
+        #expect((58...65).contains(100 - game.tanks[1].health))
         #expect(game.phase == .aiming)
         #expect(game.currentIndex == 1)
     }
@@ -136,7 +136,7 @@ struct GameplayTests {
         let game = makeGame()
         game.lift(tank: 1, by: 80)
         game.runUntilSettled()
-        #expect(abs(game.tanks[1].health - (100 - (80 - 6) * 0.5)) < 0.5)
+        #expect(abs(game.tanks[1].health - (100 - (80 - Game.safeFallHeight) * Game.fallDamagePerUnit)) < 0.5)
     }
 
     @Test func drivingMovesTheTankAndBurnsFuel() {
@@ -182,7 +182,7 @@ struct GameplayTests {
         game.stopDriving()
         for _ in 0..<120 { game.stepForTesting() }
         #expect(game.tanks[0].position.y < 101)
-        #expect(abs(game.tanks[0].health - (100 - (80 - 6) * 0.5)) < 1)
+        #expect(abs(game.tanks[0].health - (100 - (80 - Game.safeFallHeight) * Game.fallDamagePerUnit)) < 1)
     }
 
     @Test func aShieldSoaksUpTheBlast() throws {
@@ -195,6 +195,6 @@ struct GameplayTests {
         let aim = try aimAtOpponent(in: game)
         game.fireForTesting(weapon: .babyMissile, angle: aim.angle, power: aim.power)
         game.runUntilSettled()
-        #expect(game.tanks[1].health >= 97, "only fall damage gets through")
+        #expect(game.tanks[1].health >= 94, "only fall damage gets through")
     }
 }

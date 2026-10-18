@@ -177,6 +177,9 @@ final class Game {
     nonisolated static let fallSpeed = 160.0
     nonisolated static let parachuteSpeed = 35.0
     nonisolated static let driveSpeed = 28.0
+    /// Falls shorter than this are free; beyond it, each unit costs `fallDamagePerUnit`.
+    nonisolated static let safeFallHeight = 5.0
+    nonisolated static let fallDamagePerUnit = 0.75
     /// Power gained per second while the fire button is held.
     nonisolated static let chargeRate = 50.0
     /// The simulation always advances in steps this long, so a shot plays out the same way every time.
@@ -1047,7 +1050,7 @@ final class Game {
                 tanks[i].position.y = ground
                 if tanks[i].fallDistance > 0 {
                     if !tanks[i].isParachuting {
-                        damage(tankAt: i, by: max(0, tanks[i].fallDistance - 6) * 0.5, attackerID: tanks[i].lastAttackerID, bypassesShield: true)
+                        damage(tankAt: i, by: max(0, tanks[i].fallDistance - Game.safeFallHeight) * Game.fallDamagePerUnit, attackerID: tanks[i].lastAttackerID, bypassesShield: true)
                     }
                     tanks[i].fallDistance = 0
                     tanks[i].isParachuting = false

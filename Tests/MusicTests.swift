@@ -29,6 +29,15 @@ struct MusicTests {
         #expect(render(synth, seconds: 4) < 0.0005)
     }
 
+    @Test func theSongRunsMuchLongerThanFourBarsBeforeRepeating() {
+        for tense in [false, true] {
+            let song = (0..<MusicSynth.barsPerSong).map { MusicSynth.chord(forBar: $0, tense: tense) }
+            #expect(Array(song[0..<4]) != Array(song[4..<8]))
+            #expect(Array(song[0..<8]) != Array(song[8..<16]))
+            #expect(Array(song[0..<16]) != Array(song[16..<32]))
+        }
+    }
+
     @Test func higherTensionIsLouderAndBusier() {
         let calm = MusicSynth(sampleRate: 44_100)
         calm.update(tension: 0.1, enabled: true)

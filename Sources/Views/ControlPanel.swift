@@ -106,7 +106,10 @@ struct ControlPanel: View {
             ForEach(Weapon.arsenal) { weapon in
                 let count = tank.ammoCount(weapon)
                 if count != 0 {
-                    Button("\(weapon.name)  \(count.map(String.init) ?? "∞")") { game.select(weapon) }
+                    Button { game.select(weapon) } label: {
+                        Text(weapon.name)
+                        Text(count.map { "\($0) left" } ?? "Unlimited")
+                    }
                 }
             }
         } label: {
