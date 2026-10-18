@@ -50,7 +50,7 @@ struct BattlefieldView: View {
                     let p = mapper.screen(e.center)
                     return Vec(p.x / proxy.size.width, p.y / proxy.size.height)
                 }
-                let _ = ambience.update(time: time, wind: wind, blasts: blasts, weather: weather, onStrike: isSecondary ? {} : game.thunder)
+                let _ = ambience.update(time: time, wind: wind, blasts: blasts, weather: weather, hasUFOs: theme == .moon, onStrike: isSecondary ? {} : game.thunder)
                 Canvas { context, size in
                     drawSky(look, weather: weather, in: &context, size: size, mapper: mapper, time: time)
                     // Buried tanks go behind the ground so the dirt covers them.
@@ -139,6 +139,9 @@ struct BattlefieldView: View {
 
         for comet in ambience.comets {
             drawComet(comet, in: &context, size: size)
+        }
+        for ufo in ambience.ufos {
+            drawUFO(ufo, in: &context, size: size, time: time)
         }
 
         switch look.celestial {
@@ -275,22 +278,50 @@ struct BattlefieldView: View {
                      with: .radialGradient(Gradient(colors: [Color(red: 0.4, green: 0.6, blue: 1).opacity(0.35), .clear]), center: center, startRadius: r, endRadius: r * 1.6))
         let disc = CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)
         context.fill(Path(ellipseIn: disc), with: .radialGradient(
-            Gradient(colors: [Color(red: 0.25, green: 0.5, blue: 0.95), Color(red: 0.05, green: 0.15, blue: 0.4)]),
+            Gradient(colors: [Color(red: 0.2, green: 0.45, blue: 0.9), Color(red: 0.04, green: 0.12, blue: 0.38)]),
             center: CGPoint(x: center.x - r * 0.35, y: center.y - r * 0.35), startRadius: 0, endRadius: r * 1.5))
+
+        // Orthographic projection of a slowly turning globe, tilted toward us. Each cell of a grid over the disc
+        // is traced back to a longitude and latitude and colored from the land map.
+        let spin = (time * 4).truncatingRemainder(dividingBy: 360) - 100
+        let tilt = 20.0 * .pi / 180
         var surface = context
         surface.clip(to: Path(ellipseIn: disc))
-        let spin = time * 0.01
-        for i in 0..<6 {
-            let u = (hash(i, 50) + spin).truncatingRemainder(dividingBy: 1) * 2.6 - 0.8
-            let land = CGRect(x: center.x + (u - 0.5) * r * 2, y: center.y + (hash(i, 51) - 0.5) * r * 1.6, width: r * (0.4 + hash(i, 52) * 0.6), height: r * (0.25 + hash(i, 53) * 0.4))
-            surface.fill(Path(ellipseIn: land), with: .color(Color(red: 0.25, green: 0.55, blue: 0.3).opacity(0.85)))
+        var land = Path(), ice = Path()
+        let cells = 30
+        let cell = 2 * r / Double(cells)
+        for row in 0..<cells {
+            for column in 0..<cells {
+                let x = (Double(column) + 0.5) / Double(cells) * 2 - 1
+                let y = 1 - (Double(row) + 0.5) / Double(cells) * 2
+                let ρ2 = x * x + y * y
+                guard ρ2 < 1 else { continue }
+                let z = (1 - ρ2).squareRoot()
+                let φ = asin(y * cos(tilt) + z * sin(tilt))
+                let λ = atan2(x, z * cos(tilt) - y * sin(tilt))
+                let lon = λ * 180 / .pi + spin, lat = φ * 180 / .pi
+                guard let kind = EarthMap.surface(lon: lon, lat: lat) else { continue }
+                let rect = CGRect(x: center.x - r + Double(column) * cell, y: center.y - r + Double(row) * cell, width: cell + 0.6, height: cell + 0.6)
+                if kind == .ice { ice.addRect(rect) } else { land.addRect(rect) }
+            }
+        }
+        surface.fill(land, with: .color(Color(red: 0.3, green: 0.56, blue: 0.28)))
+        surface.fill(ice, with: .color(Color(white: 0.92)))
+        func project(_ lon: Double, _ lat: Double) -> CGPoint {
+            let λ = (lon - spin) * .pi / 180, φ = lat * .pi / 180
+            let x = cos(φ) * sin(λ)
+            let y = cos(tilt) * sin(φ) - sin(tilt) * cos(φ) * cos(λ)
+            return CGPoint(x: center.x + x * r, y: center.y - y * r)
         }
         for i in 0..<5 {
-            let u = (hash(i, 60) + spin * 1.6).truncatingRemainder(dividingBy: 1) * 2.6 - 0.8
-            let cloud = CGRect(x: center.x + (u - 0.5) * r * 2, y: center.y + (hash(i, 61) - 0.5) * r * 1.8, width: r * (0.6 + hash(i, 62) * 0.7), height: r * 0.18)
-            surface.fill(Path(roundedRect: cloud, cornerRadius: r * 0.09), with: .color(.white.opacity(0.7)))
+            let lon = hash(i, 60) * 360 + time * 6, lat = (hash(i, 61) - 0.5) * 110
+            let p = project(lon, lat)
+            let facing = sin(tilt) * sin(lat * .pi / 180) + cos(tilt) * cos(lat * .pi / 180) * cos((lon - spin) * .pi / 180)
+            guard facing > 0.1 else { continue }
+            let cloud = CGRect(x: p.x - r * 0.35, y: p.y - r * 0.06, width: r * 0.7, height: r * 0.12)
+            surface.fill(Path(roundedRect: cloud, cornerRadius: r * 0.06), with: .color(.white.opacity(0.65)))
         }
-        surface.fill(Path(ellipseIn: disc), with: .linearGradient(Gradient(colors: [.clear, .black.opacity(0.65)]),
+        surface.fill(Path(ellipseIn: disc), with: .linearGradient(Gradient(colors: [.clear, .black.opacity(0.6)]),
                                                                   startPoint: CGPoint(x: center.x - r * 0.2, y: center.y), endPoint: CGPoint(x: center.x + r, y: center.y)))
     }
 
@@ -367,6 +398,44 @@ struct BattlefieldView: View {
         context.fill(Path(ellipseIn: CGRect(x: head.x - glow, y: head.y - glow, width: glow * 2, height: glow * 2)),
                      with: .radialGradient(Gradient(colors: [.white.opacity(brightness), .cyan.opacity(brightness * 0.4), .clear]),
                                            center: head, startRadius: 0, endRadius: glow))
+    }
+
+    private func drawUFO(_ ufo: Ambience.UFO, in context: inout GraphicsContext, size: CGSize, time: Double) {
+        let bob = sin(ufo.age * 2.6) * 3
+        let center = CGPoint(x: ufo.position.x * size.width, y: ufo.position.y * size.height + bob)
+        let w = min(max(size.width * 0.045, 22), 46)
+
+        if ufo.beamStrength > 0 {
+            var beam = Path()
+            let bottom = size.height * 0.95
+            beam.move(to: CGPoint(x: center.x - w * 0.18, y: center.y + w * 0.12))
+            beam.addLine(to: CGPoint(x: center.x + w * 0.18, y: center.y + w * 0.12))
+            beam.addLine(to: CGPoint(x: center.x + w * 0.75, y: bottom))
+            beam.addLine(to: CGPoint(x: center.x - w * 0.75, y: bottom))
+            beam.closeSubpath()
+            var glow = context
+            glow.blendMode = .plusLighter
+            glow.fill(beam, with: .linearGradient(Gradient(colors: [Color(red: 0.6, green: 1, blue: 0.7).opacity(0.45 * ufo.beamStrength), .clear]),
+                                                  startPoint: center, endPoint: CGPoint(x: center.x, y: bottom)))
+        }
+
+        var tilted = context
+        tilted.translateBy(x: center.x, y: center.y)
+        tilted.rotate(by: .degrees(ufo.stage == .leaving ? -12 * ufo.direction : sin(ufo.age * 1.7) * 4))
+        let dome = CGRect(x: -w * 0.24, y: -w * 0.32, width: w * 0.48, height: w * 0.4)
+        tilted.fill(Path(ellipseIn: dome), with: .linearGradient(Gradient(colors: [Color(red: 0.7, green: 0.95, blue: 1).opacity(0.9), Color(red: 0.2, green: 0.5, blue: 0.7).opacity(0.8)]),
+                                                                 startPoint: CGPoint(x: 0, y: dome.minY), endPoint: CGPoint(x: 0, y: dome.maxY)))
+        let saucer = CGRect(x: -w / 2, y: -w * 0.1, width: w, height: w * 0.26)
+        tilted.fill(Path(ellipseIn: saucer), with: .linearGradient(Gradient(colors: [Color(white: 0.85), Color(white: 0.45)]),
+                                                                   startPoint: CGPoint(x: 0, y: saucer.minY), endPoint: CGPoint(x: 0, y: saucer.maxY)))
+        let colors: [Color] = [.red, .yellow, .green, .cyan, .pink]
+        for i in 0..<5 {
+            let x = (Double(i) - 2) * w * 0.18
+            let lit = Int(time * 6 + Double(i)) % 5 == i
+            let r = w * 0.035
+            tilted.fill(Path(ellipseIn: CGRect(x: x - r, y: w * 0.02 - r, width: r * 2, height: r * 2)),
+                        with: .color(colors[i].opacity(lit ? 1 : 0.45)))
+        }
     }
 
     private func drawFlock(_ flock: Ambience.Flock, in context: inout GraphicsContext, size: CGSize) {

@@ -19,6 +19,25 @@ final class Ambience {
         var brightness: Double { sin(.pi * min(age / lifetime, 1)) }
     }
 
+    /// Drifts in, stops to beam something up, then zips away.
+    struct UFO {
+        enum Stage { case arriving, beaming, leaving }
+
+        var position: Vec
+        let direction: Double
+        let stopX: Double
+        var stage = Stage.arriving
+        var stageTime = 0.0
+        var age = 0.0
+
+        var beamStrength: Double {
+            guard stage == .beaming else { return 0 }
+            return min(1, stageTime / 0.4) * min(1, (UFO.beamDuration - stageTime) / 0.4)
+        }
+
+        static let beamDuration = 2.4
+    }
+
     struct Flock {
         var position: Vec
         var velocity: Vec
@@ -48,6 +67,7 @@ final class Ambience {
     private(set) var lightningFlash = 0.0
     private var untilStrike = Double.random(in: 4...9)
     private(set) var comets: [Comet] = []
+    private(set) var ufos: [UFO] = []
     private(set) var flocks: [Flock] = []
     private var lastTime: Double?
     private var untilComet = Double.random(in: 6...15)
@@ -58,7 +78,7 @@ final class Ambience {
     }
 
     /// `blasts` are explosion centers in the same normalized space; nearby flocks scatter.
-    func update(time: Double, wind: Double, blasts: [Vec], weather: Weather, onStrike: () -> Void) {
+    func update(time: Double, wind: Double, blasts: [Vec], weather: Weather, hasUFOs: Bool = false, onStrike: () -> Void) {
         let dt = lastTime.map { min(max(time - $0, 0), 0.1) } ?? 0
         lastTime = time
         guard dt > 0 else { return }
@@ -74,9 +94,36 @@ final class Ambience {
 
         untilComet -= dt
         if untilComet <= 0 {
-            comets.append(Ambience.makeComet())
-            untilComet = Double.random(in: 20...40)
+            if hasUFOs {
+                ufos.append(Ambience.makeUFO())
+                untilComet = Double.random(in: 18...35)
+            } else {
+                comets.append(Ambience.makeComet())
+                untilComet = Double.random(in: 20...40)
+            }
         }
+        if !hasUFOs { ufos = [] }
+        for i in ufos.indices {
+            ufos[i].age += dt
+            ufos[i].stageTime += dt
+            switch ufos[i].stage {
+            case .arriving:
+                ufos[i].position.x += ufos[i].direction * 0.12 * dt
+                if (ufos[i].position.x - ufos[i].stopX) * ufos[i].direction >= 0 {
+                    ufos[i].stage = .beaming
+                    ufos[i].stageTime = 0
+                }
+            case .beaming:
+                if ufos[i].stageTime >= UFO.beamDuration {
+                    ufos[i].stage = .leaving
+                    ufos[i].stageTime = 0
+                }
+            case .leaving:
+                let speed = 0.12 + ufos[i].stageTime * 1.2
+                ufos[i].position += Vec(ufos[i].direction * speed, -speed * 0.35) * dt
+            }
+        }
+        ufos.removeAll { $0.position.x < -0.2 || $0.position.x > 1.2 || $0.position.y < -0.2 }
         for i in comets.indices {
             comets[i].age += dt
             comets[i].position += comets[i].velocity * dt
@@ -167,6 +214,15 @@ final class Ambience {
             position: Vec(direction > 0 ? Double.random(in: 0...0.5) : Double.random(in: 0.5...1), Double.random(in: -0.05...0.1)),
             velocity: Vec(direction * Double.random(in: 0.25...0.4), Double.random(in: 0.05...0.12)),
             lifetime: Double.random(in: 2.5...3.5)
+        )
+    }
+
+    private static func makeUFO() -> UFO {
+        let direction = Bool.random() ? 1.0 : -1.0
+        return UFO(
+            position: Vec(direction > 0 ? -0.08 : 1.08, Double.random(in: 0.12...0.3)),
+            direction: direction,
+            stopX: Double.random(in: 0.25...0.75)
         )
     }
 

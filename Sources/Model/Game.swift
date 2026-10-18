@@ -191,6 +191,8 @@ final class Game {
     /// Falls shorter than this are free; beyond it, each unit costs `fallDamagePerUnit`.
     nonisolated static let safeFallHeight = 5.0
     nonisolated static let fallDamagePerUnit = 0.75
+    /// At or below this health the music switches to its danger arrangement.
+    nonisolated static let dangerHealth = 20.0
     /// Power gained per second while the fire button is held.
     nonisolated static let chargeRate = 50.0
     /// The simulation always advances in steps this long, so a shot plays out the same way every time.
@@ -309,7 +311,8 @@ final class Game {
             if phase == .firing { tension += 0.15 }
             if chargePower != nil { tension += 0.1 }
         }
-        sound.setMusic(tension: tension, enabled: settings.musicEnabled, level: level)
+        let isDanger = (phase == .aiming || phase == .firing) && tanks.contains { $0.isAlive && $0.health <= Game.dangerHealth }
+        sound.setMusic(tension: tension, enabled: settings.musicEnabled, level: level, danger: isDanger)
     }
 
     private func buzz(_ intensity: Double) {
@@ -419,6 +422,7 @@ final class Game {
             if players[i].id == winnerID { players[i].wins += 1 }
         }
         phase = .roundOver(winnerID: winnerID)
+        sound.playFanfare()
         updateMusic()
     }
 
@@ -650,7 +654,7 @@ final class Game {
         killCamHold = 1.8
         killCamImpactTime = nil
         camera = .overview
-        timeScale = 0.4
+        timeScale = 1
         phase = .killCam
         launch(shot.weapon, from: tanks[shot.shooterIndex], seed: shot.seed)
         return true
@@ -682,14 +686,17 @@ final class Game {
         var target = Camera(center: victim.turretCenter, zoom: 3.2)
         var speed = 0.4
         if let shell = projectiles.min(by: { ($0.position - victim.turretCenter).length < ($1.position - victim.turretCenter).length }) {
+            // 1 when far from the victim, easing to 0 as the shell closes in.
             let distance = (shell.position - victim.turretCenter).length
-            target = Camera(center: shell.position, zoom: distance < 140 ? 2.6 : 1.8)
-            speed = distance < 80 ? 0.12 : 0.4
+            let t = min(max((distance - 40) / 360, 0), 1)
+            let far = t * t * (3 - 2 * t)
+            target = Camera(center: shell.position, zoom: 1.6 + 1.2 * (1 - far))
+            speed = 0.1 + 0.9 * far
         } else if lastImpact != nil {
             killCamImpactTime = (killCamImpactTime ?? 0) + dt
             speed = (killCamImpactTime ?? 0) < 0.8 ? 0.2 : 0.6
         }
-        timeScale += (speed - timeScale) * min(1, dt * 6)
+        timeScale += (speed - timeScale) * min(1, dt * 4)
         var view = camera ?? .overview
         let ease = min(1, dt * 3.5)
         view.center += (target.center - view.center) * ease

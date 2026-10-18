@@ -18,6 +18,20 @@ final class MusicSynth: AudioRenderer {
     private static let c = Chord(bass: 48, tones: [55, 60, 64]), g = Chord(bass: 43, tones: [55, 59, 62])
     private static let dm = Chord(bass: 38, tones: [50, 53, 57]), e = Chord(bass: 40, tones: [56, 59, 64])
     private static let em = Chord(bass: 40, tones: [55, 59, 64])
+    /// The half-step lurch from A minor up to B♭ is what makes the danger loop sound like trouble.
+    private static let bb = Chord(bass: 46, tones: [58, 62, 65])
+    private static let danger = [am, bb, am, e]
+
+    /// The victory fanfare, in C major: one chord per bar, then a held final chord.
+    private static let fanfareChords = [Chord(bass: 48, tones: [60, 64, 67]), Chord(bass: 41, tones: [57, 60, 65]),
+                                        Chord(bass: 43, tones: [59, 62, 67]), Chord(bass: 48, tones: [60, 64, 67])]
+    private static let fanfareMelody: [(bar: Int, step: Int, note: Int)] = [
+        (0, 0, 67), (0, 3, 72), (0, 6, 76), (0, 8, 79),
+        (1, 0, 77), (1, 4, 76), (1, 8, 74), (1, 12, 72),
+        (2, 0, 74), (2, 4, 76), (2, 8, 77), (2, 12, 79),
+        (3, 0, 84),
+    ]
+    static let fanfareBars = 6
 
     /// Four-bar sections, arranged into 32-bar songs so nothing repeats too soon.
     private static let sections: [[Chord]] = [
@@ -67,6 +81,15 @@ final class MusicSynth: AudioRenderer {
         var leadPhase = 0.0, leadFrequency = 440.0, leadTarget = 440.0, leadEnvelope = 0.0, leadNote = 5
         var barRhythm = 0
         var melodySeed: UInt32 = 7
+        /// Danger fades in and out smoothly, but its chords and drums only switch at a bar line.
+        var wantsDanger = false
+        var isDanger = false
+        var danger = 0.0
+        var snarePhase = 0.0, snareEnvelope = 0.0
+        var leadDecay = 0.99993
+        /// Bars into the victory fanfare, or `nil` when it isn't playing.
+        var fanfareBar: Int?
+        var fanfareRequested = false
     }
 
     private let sampleRate: Double
@@ -76,11 +99,16 @@ final class MusicSynth: AudioRenderer {
         self.sampleRate = sampleRate
     }
 
-    func update(tension: Double, enabled: Bool, level: Double = 0.55) {
+    func update(tension: Double, enabled: Bool, level: Double = 0.55, danger: Bool = false) {
         state.withLock {
             $0.targetTension = min(max(tension, 0), 1)
             $0.targetGain = enabled ? level : 0
+            $0.wantsDanger = danger
         }
+    }
+
+    func playFanfare() {
+        state.withLock { $0.fanfareRequested = true }
     }
 
     func render(frameCount: Int, buffers: UnsafeMutableAudioBufferListPointer) {
@@ -97,10 +125,11 @@ final class MusicSynth: AudioRenderer {
                     continue
                 }
 
+                s.danger += ((s.isDanger ? 1 : 0) - s.danger) * 0.00006
                 s.untilNextStep -= 1
                 if s.untilNextStep <= 0 {
                     trigger(&s)
-                    let bpm = 80 + 50 * s.tension
+                    let bpm = s.fanfareBar != nil ? 112 : 80 + 50 * s.tension + 22 * s.danger
                     s.untilNextStep += sampleRate * 60 / bpm / 4
                 }
 
@@ -136,11 +165,15 @@ final class MusicSynth: AudioRenderer {
                 let vibrato = 1 + 0.004 * sin(2 * .pi * s.lfo * 22)
                 s.leadPhase = (s.leadPhase + s.leadFrequency * vibrato * dt).truncatingRemainder(dividingBy: 1)
                 let leadWave = sin(2 * .pi * s.leadPhase) + 0.25 * sin(6 * .pi * s.leadPhase)
-                let lead = leadWave * s.leadEnvelope * 0.055 * (1 - 0.4 * s.tension)
-                s.leadEnvelope *= 0.99993
+                let lead = leadWave * s.leadEnvelope * 0.055 * (s.fanfareBar != nil ? 1.3 : (1 - 0.4 * s.tension) * (1 - 0.6 * s.danger))
+                s.leadEnvelope *= s.leadDecay
+
+                s.snarePhase = (s.snarePhase + 190 * dt).truncatingRemainder(dividingBy: 1)
+                let snare = (noise * 0.8 + sin(2 * .pi * s.snarePhase) * 0.6) * s.snareEnvelope * 0.12
+                s.snareEnvelope *= 0.9991
 
                 let arpPan = s.arpIndex % 2 == 0 ? 0.35 : 0.65
-                let center = pad + bass + kick + lead
+                let center = pad + bass + kick + lead + snare
                 left[frame] = Float((center + hat * 0.4 + arp * (1 - arpPan)) * s.gain)
                 right[frame] = Float((center + hat * 0.6 + arp * arpPan) * s.gain)
             }
@@ -148,10 +181,36 @@ final class MusicSynth: AudioRenderer {
     }
 
     private func trigger(_ s: inout State) {
+        if s.fanfareRequested {
+            s.fanfareRequested = false
+            s.fanfareBar = 0
+            s.step = 0
+        }
+        if s.fanfareBar != nil {
+            triggerFanfare(&s)
+            return
+        }
+        if s.step == 0 { s.isDanger = s.wantsDanger }
+
         let tense = s.tension > 0.65
         let beat = s.step
-        let chord = Self.chord(forBar: s.bar, tense: tense)
+        let chord = s.isDanger ? Self.danger[s.bar % 4] : Self.chord(forBar: s.bar, tense: tense)
         let isSectionEnd = s.bar % 4 == 3
+        s.leadDecay = 0.99993
+
+        if s.isDanger {
+            // A relentless eighth-note bass, kick on every beat, snare on two and four, sixteenth hats.
+            if beat % 2 == 0 {
+                s.bassFrequency = frequency(chord.bass + (beat % 8 == 6 ? 12 : 0))
+                s.bassEnvelope = 0.9
+            }
+            if beat % 4 == 0 {
+                s.kickEnvelope = 1
+                s.kickPhase = 0
+            }
+            if beat == 4 || beat == 12 || (isSectionEnd && beat >= 13) { s.snareEnvelope = 1 }
+            s.hatEnvelope = beat % 4 == 2 ? 1 : 0.6
+        }
 
         if beat == 0 {
             for (i, tone) in chord.tones.enumerated() {
@@ -164,7 +223,7 @@ final class MusicSynth: AudioRenderer {
         }
 
         let bassBeats: Set<Int> = s.tension > 0.6 ? [0, 3, 6, 8, 11, 14] : (s.bar % 2 == 0 ? [0, 8] : [0, 6, 8])
-        if bassBeats.contains(beat) {
+        if !s.isDanger, bassBeats.contains(beat) {
             s.bassFrequency = frequency(chord.bass + (s.tension > 0.6 && beat % 3 == 0 && beat > 0 ? 12 : 0))
             s.bassEnvelope = 1
         }
@@ -213,6 +272,41 @@ final class MusicSynth: AudioRenderer {
                 s.bar = 0
                 s.songsPlayed += 1
             }
+        }
+    }
+
+    private func triggerFanfare(_ s: inout State) {
+        guard let bar = s.fanfareBar else { return }
+        let beat = s.step
+        let chord = Self.fanfareChords[min(bar, Self.fanfareChords.count - 1)]
+        if beat == 0, bar < Self.fanfareChords.count {
+            for (i, tone) in chord.tones.enumerated() {
+                s.padFrequencies[i] = frequency(tone)
+                s.padFrequencies[i + 3] = frequency(tone) * 1.004
+            }
+            s.bassFrequency = frequency(chord.bass)
+            s.bassEnvelope = 1
+            s.kickEnvelope = 1
+            s.kickPhase = 0
+        }
+        if bar < 3, beat == 8 {
+            s.kickEnvelope = 0.8
+            s.kickPhase = 0
+        }
+        if bar == 2, beat >= 12 { s.snareEnvelope = 0.8 }
+        if bar == 3, beat == 0 { s.snareEnvelope = 1 }
+        if let note = Self.fanfareMelody.first(where: { $0.bar == bar && $0.step == beat }) {
+            s.leadTarget = frequency(note.note)
+            s.leadFrequency = s.leadTarget
+            s.leadEnvelope = 1.4
+            s.leadDecay = bar == 3 ? 0.99998 : 0.99995
+        }
+
+        s.step += 1
+        if s.step == Self.stepsPerBar {
+            s.step = 0
+            s.fanfareBar = bar + 1 < Self.fanfareBars ? bar + 1 : nil
+            if s.fanfareBar == nil { s.bar = 0 }
         }
     }
 
