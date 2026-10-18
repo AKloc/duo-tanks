@@ -1,6 +1,6 @@
 # Duo Tanks
 
-A Scorched Earth–style artillery game for the iPhone Duo. Lob shells across destructible hills, account for the wind, and blow your opponent off the map.
+A classic turn-based artillery game for the iPhone Duo. Lob shells across destructible hills, account for the wind, and blow your opponent off the map.
 
 ## Features
 
@@ -25,6 +25,10 @@ open DuoTanks.xcodeproj
 ```
 
 Run tests with `xcodebuild test -project DuoTanks.xcodeproj -scheme DuoTanks -destination 'platform=iOS Simulator,name=iPhone Duo'`.
+
+## Releasing
+
+Store copy and screenshots are in `AppStore/`. To upload a build: `TEAM_ID=<your team ID> scripts/upload.sh`.
 
 ## License
 

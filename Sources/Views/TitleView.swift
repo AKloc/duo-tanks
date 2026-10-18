@@ -35,8 +35,8 @@ struct TitleView: View {
                     } else {
                         Toggle(isOn: $handoffEnabled) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Fold to hand off")
-                                Text("Hide your turn and shop until the next player unfolds the phone. Lay it flat for tabletop play instead.")
+                                Text("Private turns")
+                                Text("Hide your turn and shop until the phone changes hands. On iPhone Duo, fold to pass it over, or lay it flat for tabletop play.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -112,7 +112,7 @@ struct TitleView: View {
                 .fill(.orange)
                 .frame(width: 64, height: 3)
                 .padding(.top, 2)
-            Text("An artillery duel for iPhone Duo")
+            Text("A turn-based artillery duel")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .padding(.top, 6)

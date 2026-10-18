@@ -151,6 +151,7 @@ struct HandoffCover: View {
     let player: Player
     let isShopping: Bool
     let isFolded: Bool
+    var hasHinge = true
     let onStart: () -> Void
 
     var body: some View {
@@ -169,7 +170,7 @@ struct HandoffCover: View {
                         .font(.title3.bold())
                         .foregroundStyle(.white.opacity(0.85))
                 } else {
-                    Text("Pass the phone to \(player.name). Fold it to hand it over, then unfold.")
+                    Text(hasHinge ? "Pass the phone to \(player.name). Fold it to hand it over, then unfold." : "Pass the phone to \(player.name).")
                         .font(.callout)
                         .foregroundStyle(.white.opacity(0.75))
                         .multilineTextAlignment(.center)

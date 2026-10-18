@@ -470,8 +470,9 @@ struct BattlefieldView: View {
         surface.addLine(to: mapper.screen(Vec(rightEdge, heights[last])))
 
         var groundPath = surface
-        groundPath.addLine(to: mapper.screen(Vec(rightEdge, -10)))
-        groundPath.addLine(to: mapper.screen(Vec(leftEdge, -10)))
+        // Well below the bottom so the ground never ends inside the view, even mid-resize.
+        groundPath.addLine(to: mapper.screen(Vec(rightEdge, -2_000)))
+        groundPath.addLine(to: mapper.screen(Vec(leftEdge, -2_000)))
         groundPath.closeSubpath()
 
         var ground = context

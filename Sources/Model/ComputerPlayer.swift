@@ -90,13 +90,9 @@ enum ComputerPlayer {
             tanks: game.tanks.filter(\.isAlive).map { Ballistics.Target(id: $0.id, center: $0.turretCenter) }
         )
         let aimPoint = target.turretCenter
-        var aim = await Task.detached(priority: .userInitiated) { ballistics.bestAim(at: aimPoint) }.value
+        let safeRadius = weapon.blastRadius + Tank.hitRadius + 10
+        let aim = await Task.detached(priority: .userInitiated) { ballistics.bestAim(at: aimPoint, safeRadius: safeRadius) }.value
         guard !Task.isCancelled else { return }
-
-        if let candidate = aim, (candidate.impact - me.turretCenter).length < weapon.blastRadius + 18 {
-            game.select(.babyMissile)
-            aim = candidate
-        }
 
         let record = shotsThisRound[me.id]
         let shots = record?.round == game.round ? record!.count : 0

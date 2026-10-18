@@ -52,7 +52,8 @@ struct Ballistics: Sendable {
     }
 
     /// The angle and power that land closest to `target`, searching coarsely then refining.
-    func bestAim(at target: Vec) -> Aim? {
+    /// Shots landing within `safeRadius` of the shooter are never chosen.
+    func bestAim(at target: Vec, safeRadius: Double = 0) -> Aim? {
         let facingRight = target.x >= origin.x
         func mirrored(_ elevation: Double) -> Double { facingRight ? elevation : 180 - elevation }
 
@@ -60,7 +61,7 @@ struct Ballistics: Sendable {
         func consider(_ elevation: Double, _ power: Double) {
             guard (0...100).contains(power), (2...88).contains(elevation) else { return }
             let angle = mirrored(elevation)
-            guard let hit = impact(angle: angle, power: power) else { return }
+            guard let hit = impact(angle: angle, power: power), (hit - origin).length >= safeRadius else { return }
             let miss = (hit - target).length
             if miss < best?.miss ?? .infinity {
                 best = Aim(angle: angle, power: power, impact: hit, miss: miss)

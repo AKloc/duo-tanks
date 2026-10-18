@@ -86,7 +86,7 @@ struct Projectile: Identifiable {
     /// Set while a Roller is rolling: -1 left, +1 right.
     var rollDirection: Double?
     var rollTime = 0.0
-    /// Set while a Sandhog is tunneling: seconds left underground.
+    /// Set while a Burrower is tunneling: seconds left underground.
     var burrowTimeLeft: Double?
     var burrowDistance = 0.0
 
@@ -391,6 +391,7 @@ final class Game {
         updateMusic()
         scheduleComputerTurn()
     }
+
 
 
 

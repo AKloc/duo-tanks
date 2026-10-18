@@ -42,6 +42,7 @@ struct GameView: View {
                 VStack(spacing: 0) {
                     BattlefieldView(game: game, director: isLaptopPosture ? director : nil)
                         .frame(maxHeight: .infinity)
+                        .ignoresSafeArea(edges: .horizontal)
                     if isLaptopPosture, game.phase == .firing {
                         MiniMapPanel(game: game, director: director)
                             .frame(maxHeight: .infinity)
@@ -57,7 +58,7 @@ struct GameView: View {
         }
         .overlay {
             if let id = handoffPlayerID, usesHandoff, let player = game.players.first(where: { $0.id == id }) {
-                HandoffCover(player: player, isShopping: turnToken.hasPrefix("shop"), isFolded: isFolded, onStart: dismissHandoff)
+                HandoffCover(player: player, isShopping: turnToken.hasPrefix("shop"), isFolded: isFolded, hasHinge: hinge != nil, onStart: dismissHandoff)
             }
         }
         .animation(.snappy, value: game.phase)

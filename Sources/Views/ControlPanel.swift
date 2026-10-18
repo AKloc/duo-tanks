@@ -8,6 +8,7 @@ struct ControlPanel: View {
     @AppStorage("music") private var musicEnabled = true
     @AppStorage("layout") private var layout = LayoutSetting.auto
     @AppStorage("handoff") private var handoffEnabled = true
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     var body: some View {
         Group {
@@ -36,9 +37,21 @@ struct ControlPanel: View {
     }
 
     private func controls(for tank: Tank) -> some View {
-        let money = game.players.first { $0.id == tank.id }?.money ?? 0
         let isComputer = game.isComputerTurn
-        return HStack(spacing: 20) {
+        let isCompact = verticalSizeClass == .compact && hinge?.isPartiallyOpen != true
+        return Group {
+            if isCompact {
+                compactControls(for: tank, isComputer: isComputer)
+            } else {
+                regularControls(for: tank, isComputer: isComputer)
+            }
+        }
+        .disabled(game.phase != .aiming)
+        .allowsHitTesting(!isComputer)
+    }
+
+    private func regularControls(for tank: Tank, isComputer: Bool) -> some View {
+        HStack(spacing: 20) {
             VStack(spacing: 10) {
                 HStack(spacing: 10) {
                     Circle().fill(tank.color).frame(width: 12, height: 12)
@@ -53,25 +66,9 @@ struct ControlPanel: View {
                             .foregroundStyle(.secondary)
                             .accessibilityLabel("Hinge aiming")
                     }
-                    Text(money, format: .currency(code: "USD").precision(.fractionLength(0)))
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                    moneyLabel(for: tank)
                     HealthLabel(health: tank.health, shield: tank.shield)
-                    Menu {
-                        Text("\(game.theme.name) · gravity \(Int(game.theme.gravityScale * 100))%")
-                        Toggle("Music", systemImage: "music.note", isOn: $musicEnabled)
-                        Picker("Layout", systemImage: "rectangle.split.1x2", selection: $layout) {
-                            ForEach(LayoutSetting.allCases) { Text($0.name).tag($0) }
-                        }
-                        .pickerStyle(.menu)
-                        if game.players.allSatisfy({ !$0.isComputer }) {
-                            Toggle("Fold to Hand Off", systemImage: "eye.slash", isOn: $handoffEnabled)
-                        }
-                        Button("Quit to Title", systemImage: "xmark", role: .destructive, action: onQuit)
-                    } label: {
-                        Image(systemName: "ellipsis.circle").font(.title3)
-                    }
-                    .accessibilityLabel("Menu")
+                    moreMenu
                 }
 
                 HStack(spacing: 12) {
@@ -82,36 +79,104 @@ struct ControlPanel: View {
                 }
 
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(game.chargePower.map { "\(Int($0))%" } ?? "\(Int(tank.power))%")
-                        .font(.system(.largeTitle, design: .rounded).bold().monospacedDigit())
-                        .foregroundStyle(game.chargePower == nil ? .secondary : .primary)
-                        .contentTransition(.numericText())
-                    if isComputer {
-                        Label(game.computerStatus ?? "Computer's turn", systemImage: "cpu")
-                            .font(.caption.bold())
-                            .foregroundStyle(tank.color)
-                            .transaction { $0.animation = nil }
-                    } else if tank.isBuried(in: game.terrain), game.chargePower == nil {
-                        Label("Buried! Fire a Riot Charge upward to dig out", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption.bold())
-                            .foregroundStyle(.orange)
-                    } else {
-                        Text(game.chargePower == nil ? "last power · hold FIRE to charge" : "power")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    powerReadout(for: tank, font: .system(.largeTitle, design: .rounded).bold().monospacedDigit())
+                    statusText(for: tank, isComputer: isComputer, isCompact: false)
                     Spacer()
                     DrivePad(fuel: tank.inventory.fuel, onStart: game.startDriving, onStop: game.stopDriving)
                 }
             }
 
-            ArcadeButton(color: tank.color, charge: game.chargePower, hapticsEnabled: game.settings.hapticsEnabled, onPress: game.beginCharge, onRelease: { game.releaseCharge() })
+            fireButton(for: tank, size: 92)
         }
-        .disabled(game.phase != .aiming)
-        .allowsHitTesting(!isComputer)
     }
 
-    private func weaponMenu(for tank: Tank) -> some View {
+    /// One row for short screens, like a regular iPhone held sideways.
+    private func compactControls(for tank: Tank, isComputer: Bool) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Circle().fill(tank.color).frame(width: 9, height: 9)
+                    Text(tank.name).font(.subheadline.bold())
+                }
+                HealthLabel(health: tank.health, shield: tank.shield).font(.caption)
+                let money = (game.players.first { $0.id == tank.id }?.money ?? 0).formatted(.currency(code: "USD").precision(.fractionLength(0)))
+                Text("R\(game.round)/\(game.settings.rounds) · \(money)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .fixedSize()
+            AngleControl(angle: tank.angle, tint: tank.color, onChange: game.setAngle)
+            weaponMenu(for: tank, size: .small)
+                .layoutPriority(1)
+            gearMenu(for: tank)
+            DrivePad(fuel: tank.inventory.fuel, onStart: game.startDriving, onStop: game.stopDriving)
+            Spacer(minLength: 0)
+            VStack(alignment: .trailing, spacing: 0) {
+                powerReadout(for: tank, font: .system(.title2, design: .rounded).bold().monospacedDigit())
+                statusText(for: tank, isComputer: isComputer, isCompact: true)
+                    .lineLimit(1)
+            }
+            .fixedSize()
+            moreMenu
+            fireButton(for: tank, size: 64)
+        }
+    }
+
+    private func moneyLabel(for tank: Tank) -> some View {
+        Text(game.players.first { $0.id == tank.id }?.money ?? 0, format: .currency(code: "USD").precision(.fractionLength(0)))
+            .font(.subheadline.monospacedDigit())
+            .foregroundStyle(.secondary)
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Text("\(game.theme.name) · gravity \(Int(game.theme.gravityScale * 100))%")
+            Toggle("Music", systemImage: "music.note", isOn: $musicEnabled)
+            Picker("Layout", systemImage: "rectangle.split.1x2", selection: $layout) {
+                ForEach(LayoutSetting.allCases) { Text($0.name).tag($0) }
+            }
+            .pickerStyle(.menu)
+            if game.players.allSatisfy({ !$0.isComputer }) {
+                Toggle("Private Turns", systemImage: "eye.slash", isOn: $handoffEnabled)
+            }
+            Button("Quit to Title", systemImage: "xmark", role: .destructive, action: onQuit)
+        } label: {
+            Image(systemName: "ellipsis.circle").font(.title3)
+        }
+        .accessibilityLabel("Menu")
+    }
+
+    private func powerReadout(for tank: Tank, font: Font) -> some View {
+        Text(game.chargePower.map { "\(Int($0))%" } ?? "\(Int(tank.power))%")
+            .font(font)
+            .foregroundStyle(game.chargePower == nil ? .secondary : .primary)
+            .contentTransition(.numericText())
+    }
+
+    @ViewBuilder
+    private func statusText(for tank: Tank, isComputer: Bool, isCompact: Bool) -> some View {
+        if isComputer {
+            Label(game.computerStatus ?? "Computer's turn", systemImage: "cpu")
+                .font(.caption.bold())
+                .foregroundStyle(tank.color)
+                .transaction { $0.animation = nil }
+        } else if tank.isBuried(in: game.terrain), game.chargePower == nil {
+            Label(isCompact ? "Buried! Dig out" : "Buried! Fire a Dig Charge upward to dig out", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption.bold())
+                .foregroundStyle(.orange)
+        } else {
+            Text(game.chargePower == nil ? (isCompact ? "hold FIRE" : "last power · hold FIRE to charge") : "power")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func fireButton(for tank: Tank, size: Double) -> some View {
+        ArcadeButton(color: tank.color, charge: game.chargePower, hapticsEnabled: game.settings.hapticsEnabled, size: size,
+                     onPress: game.beginCharge, onRelease: { game.releaseCharge() })
+    }
+
+    private func weaponMenu(for tank: Tank, size: PlateLabel.Size = .regular) -> some View {
         Menu {
             ForEach(Weapon.arsenal) { weapon in
                 let count = tank.ammoCount(weapon)
@@ -123,8 +188,9 @@ struct ControlPanel: View {
                 }
             }
         } label: {
-            PlateSurface(tint: tank.color, prominence: .secondary) {
-                PlateLabel(title: tank.selectedWeapon.name, systemImage: ShopItem.weapon(tank.selectedWeapon).systemImage)
+            PlateSurface(tint: tank.color, prominence: .secondary, size: size) {
+                PlateLabel(title: tank.selectedWeapon.name, systemImage: ShopItem.weapon(tank.selectedWeapon).systemImage, size: size)
+                    .fixedSize()
             }
         }
         .menuStyle(.button)
@@ -325,11 +391,10 @@ struct MatchResults: View {
 
 /// A round arcade button: hold to build power (the ring fills), release to fire.
 struct ArcadeButton: View {
-    static let size = 92.0
-
     let color: Color
     let charge: Double?
     let hapticsEnabled: Bool
+    var size = 92.0
     let onPress: () -> Void
     let onRelease: () -> Void
 
@@ -337,7 +402,7 @@ struct ArcadeButton: View {
     @State private var isPressed = false
 
     var body: some View {
-        let size = ArcadeButton.size
+        let size = self.size
         let travel = 5.0
         ZStack {
             Circle()
@@ -368,7 +433,7 @@ struct ArcadeButton: View {
                     .frame(width: size * 0.55, height: size * 0.3)
                     .offset(y: -size * 0.2)
                 Text("FIRE")
-                    .font(.system(size: 20, weight: .black, design: .rounded))
+                    .font(.system(size: 20 * size / 92, weight: .black, design: .rounded))
                     .foregroundStyle(.white.opacity(0.92))
                     .shadow(color: .black.opacity(0.4), radius: 1, y: 1)
             }

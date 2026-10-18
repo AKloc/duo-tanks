@@ -32,6 +32,13 @@ struct BallisticsTests {
         #expect(aim.angle < 90)
     }
 
+    @Test func bestAimNeverLandsOnTheShooter() throws {
+        // A target right next to the shooter: the closest landing spot is the shooter itself, which must be ruled out.
+        let shooter = ballistics(wind: -40)
+        let aim = try #require(shooter.bestAim(at: Vec(230, 107), safeRadius: 40))
+        #expect((aim.impact - Vec(200, 107)).length >= 40)
+    }
+
     @Test func bestAimFacesTargetsOnTheLeft() throws {
         let shooter = Ballistics(heights: Array(repeating: 100, count: 1000), wind: 0, gravity: Game.standardGravity,
                                  speedPerPower: Game.speedPerPower, origin: Vec(800, 107), ownerID: 0, tanks: [])

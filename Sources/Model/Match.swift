@@ -158,7 +158,7 @@ enum ShopItem: Hashable, Identifiable {
         switch self {
         case let .weapon(weapon):
             switch weapon {
-            case .missile: "A bigger bang than the Baby Missile."
+            case .missile: "A bigger bang than the Shell."
             case .babyNuke: "Big blast. Clears a hilltop."
             case .nuke: "Huge blast and a blinding flash."
             case .mirv: "Splits into 5 warheads at the top of its arc."
