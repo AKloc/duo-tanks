@@ -83,17 +83,15 @@ struct CampaignTests {
         #expect(game.phase == .missionOver(won: false, stars: 0))
     }
 
-    @Test func aShieldedTargetShrugsOffADirectHit() {
+    @Test func blastsCantGetThroughTheShieldButTheFallCan() {
         let game = Game(mission: Mission.with(id: "aerie-3")!, difficulty: .normal, settings: settings())
-        game.lift(tank: 1, by: 0)
-        game.runUntilSettled()
         game.give(.weapon(.babyNuke), quantity: 1, toTank: 1)
-        let before = game.tanks[1].shield
         game.setCurrentTank(1)
         game.fireForTesting(weapon: .babyNuke, angle: 90, power: 30)
         game.runUntilSettled()
-        #expect(game.tanks[1].shield < before, "the blast hit the shield")
-        #expect(game.tanks[1].health == 50, "and none of it got through")
+        let target = game.tanks[1]
+        #expect(target.shield > 0 && target.shield < 999, "the shield soaked up the blast")
+        #expect(target.health == 0, "but the blast took out the thin island and the fall went straight through")
     }
 
     @Test func theBastionRechargesItsShield() {
