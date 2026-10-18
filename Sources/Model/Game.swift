@@ -83,12 +83,14 @@ struct Projectile: Identifiable {
 }
 
 struct Explosion: Identifiable {
+    enum Style { case fire, dirt, plasma }
+
     static let duration = 0.7
 
     let id = UUID()
     let center: Vec
     let radius: Double
-    let isDirt: Bool
+    let style: Style
     var age = 0.0
 
     var progress: Double { min(age / Explosion.duration, 1) }
@@ -103,6 +105,15 @@ struct Smolder {
     var timer = 0.0
 
     var intensity: Double { remaining / duration }
+}
+
+/// A laser beam's path, fading out.
+struct Beam: Identifiable {
+    static let lifetime = 0.6
+
+    let id = UUID()
+    let points: [Vec]
+    var age = 0.0
 }
 
 /// Burning napalm fuel that runs downhill.
@@ -197,6 +208,7 @@ final class Game {
     private(set) var shake = 0.0
     private(set) var flash = 0.0
     private(set) var turrets: [FlyingTurret] = []
+    private(set) var beams: [Beam] = []
     /// `nil` shows the whole battlefield.
     private(set) var camera: Camera?
     /// Playback speed of the simulation; slowed during the kill cam.
@@ -316,6 +328,7 @@ final class Game {
         particles = []
         floatingTexts = []
         turrets = []
+        beams = []
         camera = nil
         timeScale = 1
         lastShot = nil
@@ -526,12 +539,43 @@ final class Game {
             particles += ParticleFactory.dirt(at: center, radius: weapon.blastRadius)
             sound.dirt(atX: center.x)
             shake = max(shake, 0.3)
+        } else if case .laser = weapon.behavior {
+            fireLaser(weapon, from: tank, direction: direction)
         } else {
             var shell = Projectile(position: tank.muzzle, velocity: direction * launchSpeed(forPower: tank.power), weapon: weapon, ownerID: tank.id)
             if case let .bounce(times) = weapon.behavior { shell.bouncesLeft = times }
             projectiles = [shell]
             sound.launch(atX: tank.position.x)
         }
+    }
+
+    /// The beam travels instantly in a straight line, burning a thin tunnel and hitting every tank in its path.
+    private func fireLaser(_ weapon: Weapon, from tank: Tank, direction: Vec) {
+        var point = tank.muzzle
+        var path = [point]
+        var struck = Set<Int>()
+        var travelled = 0.0
+        while travelled < 1_400, point.x >= 0, point.x <= Game.worldSize.x, point.y >= 0, point.y <= Game.worldSize.y * 2 {
+            point += direction * 2
+            travelled += 2
+            if Int(travelled) % 6 == 0, point.y <= terrain.height(at: point.x) + weapon.blastRadius {
+                terrain.carve(center: point, radius: weapon.blastRadius, leavesScorch: false)
+                terrain.burnGrass(around: point.x, radius: 3)
+            }
+            for i in tanks.indices where tanks[i].isAlive && tanks[i].id != tank.id && !struck.contains(tanks[i].id)
+                && (tanks[i].turretCenter - point).length < Tank.hitRadius {
+                struck.insert(tanks[i].id)
+                lastImpact = point
+                damage(tankAt: i, by: weapon.damage, attackerID: tank.id)
+                rock(tanksNear: point, reach: 30, strength: 2)
+                particles += ParticleFactory.plasma(at: point, radius: 12)
+            }
+        }
+        path.append(point)
+        beams.append(Beam(points: path))
+        sound.laser(atX: tank.position.x)
+        flash = max(flash, 0.25)
+        shake = max(shake, 0.25)
     }
 
     // MARK: Kill cam
@@ -670,7 +714,7 @@ final class Game {
 
         let isSmoking = !smolders.isEmpty || tanks.contains { $0.health < 50 }
         let isMoving = tanks.contains(where: \.isRocking) || turrets.contains { !$0.isResting }
-        let isAnimating = isSmoking || isMoving || phase == .killCam || !particles.isEmpty || !floatingTexts.isEmpty || !explosions.isEmpty || shake > 0.01 || flash > 0.01
+        let isAnimating = isSmoking || isMoving || phase == .killCam || !beams.isEmpty || !particles.isEmpty || !floatingTexts.isEmpty || !explosions.isEmpty || shake > 0.01 || flash > 0.01
         if !isAnimating && phase != .firing && chargeStartedAt == nil && driveDirection == nil {
             shake = 0
             flash = 0
@@ -777,7 +821,7 @@ final class Game {
         switch weapon.behavior {
         case .dirt:
             terrain.addDirt(center: center, radius: weapon.blastRadius)
-            explosions.append(Explosion(center: center, radius: weapon.blastRadius, isDirt: true))
+            explosions.append(Explosion(center: center, radius: weapon.blastRadius, style: .dirt))
             particles += ParticleFactory.dirt(at: center, radius: weapon.blastRadius)
             sound.dirt(atX: center.x)
             shake = max(shake, 0.25)
@@ -818,11 +862,12 @@ final class Game {
             sound.dirt(atX: center.x)
             return [digger]
 
-        case .napalm:
-            flames += (0..<9).map { i in
-                Flame(x: center.x + Double(i - 4) * 4.5 + Double.random(in: -1.5...1.5, using: &rng), life: Double.random(in: 3.5...4.5, using: &rng), ownerID: p.ownerID)
+        case let .napalm(count, burnTime):
+            flames += (0..<count).map { i in
+                Flame(x: center.x + (Double(i) - Double(count - 1) / 2) * 4.5 + Double.random(in: -1.5...1.5, using: &rng),
+                      life: Double.random(in: burnTime, using: &rng), ownerID: p.ownerID)
             }
-            explosions.append(Explosion(center: center, radius: 18, isDirt: false))
+            explosions.append(Explosion(center: center, radius: 18, style: .fire))
             particles += ParticleFactory.explosion(at: center, radius: 14)
             sound.explosion(atX: center.x, radius: 20)
             return []
@@ -838,17 +883,28 @@ final class Game {
             tracers[p.ownerID] = p.trail + [center]
             return []
 
-        case .explode, .splitAtApex, .riot:
+        case let .liquidDirt(volume):
+            terrain.pourLiquid(at: center.x, volume: volume)
+            explosions.append(Explosion(center: center, radius: 22, style: .dirt))
+            particles += ParticleFactory.dirt(at: center, radius: 24)
+            sound.dirt(atX: center.x)
+            return []
+
+        case .plasma:
+            explode(weapon, at: center, ownerID: p.ownerID, directHitID: directHitID, style: .plasma)
+            return []
+
+        case .explode, .splitAtApex, .riot, .laser:
             explode(weapon, at: center, ownerID: p.ownerID, directHitID: directHitID)
             return []
         }
     }
 
-    private func explode(_ weapon: Weapon, at center: Vec, ownerID: Int, directHitID: Int?) {
+    private func explode(_ weapon: Weapon, at center: Vec, ownerID: Int, directHitID: Int?, style: Explosion.Style = .fire) {
         let radius = weapon.blastRadius
         lastImpact = center
-        terrain.carve(center: center, radius: radius)
-        blastEffects(at: center, radius: radius)
+        terrain.carve(center: center, radius: radius, leavesScorch: style == .fire)
+        blastEffects(at: center, radius: radius, style: style)
         undermine(around: center.x, radius: radius * 1.5, ownerID: ownerID)
 
         let reach = radius + Tank.hitRadius
@@ -874,13 +930,14 @@ final class Game {
         }
     }
 
-    private func blastEffects(at center: Vec, radius: Double) {
-        explosions.append(Explosion(center: center, radius: radius, isDirt: false))
-        particles += ParticleFactory.explosion(at: center, radius: radius)
+    private func blastEffects(at center: Vec, radius: Double, style: Explosion.Style = .fire) {
+        explosions.append(Explosion(center: center, radius: radius, style: style))
+        particles += style == .plasma ? ParticleFactory.plasma(at: center, radius: radius) : ParticleFactory.explosion(at: center, radius: radius)
         sound.explosion(atX: center.x, radius: radius)
         buzz(min(1, 0.4 + radius / 80))
         shake = min(1, max(shake, radius / 70))
         if radius >= 50 { flash = max(flash, min(1, radius / 100)) }
+        guard style == .fire else { return }
         let smolderTime = 4 + radius / 25
         smolders.append(Smolder(x: center.x, spread: radius * 0.4, duration: smolderTime, remaining: smolderTime))
     }
@@ -1020,6 +1077,9 @@ final class Game {
     private func updateEffects(_ dt: Double) {
         for i in explosions.indices { explosions[i].age += dt }
         explosions.removeAll { $0.age >= Explosion.duration }
+
+        for i in beams.indices { beams[i].age += dt }
+        beams.removeAll { $0.age >= Beam.lifetime }
 
         for i in floatingTexts.indices { floatingTexts[i].age += dt }
         floatingTexts.removeAll { $0.age >= FloatingText.lifetime }

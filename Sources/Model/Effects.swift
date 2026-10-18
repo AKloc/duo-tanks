@@ -72,6 +72,19 @@ enum ParticleFactory {
         return sparks + debris + fire + smoke
     }
 
+    static func plasma(at center: Vec, radius: Double) -> [Particle] {
+        (0..<Int(20 + radius)).map { _ in
+            Particle(
+                kind: .spark,
+                position: center,
+                velocity: randomDirection(upward: false) * Double.random(in: 60...(180 + radius * 4)),
+                lifetime: Double.random(in: 0.3...0.9),
+                size: Double.random(in: 1.2...3),
+                color: [Color.cyan, .purple, .white, Color(red: 0.6, green: 0.4, blue: 1)].randomElement()!
+            )
+        }
+    }
+
     static func shellSmoke(at point: Vec) -> Particle {
         Particle(
             kind: .smoke,

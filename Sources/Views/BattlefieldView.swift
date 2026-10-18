@@ -45,6 +45,7 @@ struct BattlefieldView: View {
                     drawTerrain(terrain, look: look, soil: soil, in: &context, mapper: mapper, time: time, wind: wind)
                     drawTracers(tracers, tanks: tanks, in: &context, mapper: mapper)
                     drawFlames(flames, terrain: terrain, in: &context, mapper: mapper, time: time)
+                    drawBeams(game.beams, in: &context, mapper: mapper)
                     for tank in tanks {
                         drawTank(tank, terrain: terrain, isCurrent: tank.id == currentID, in: &context, mapper: mapper, time: time)
                     }
@@ -654,6 +655,18 @@ struct BattlefieldView: View {
         }
     }
 
+    private func drawBeams(_ beams: [Beam], in context: inout GraphicsContext, mapper: WorldMapper) {
+        var glow = context
+        glow.blendMode = .plusLighter
+        for beam in beams {
+            let fade = 1 - beam.age / Beam.lifetime
+            var path = Path()
+            path.addLines(beam.points.map(mapper.screen))
+            glow.stroke(path, with: .color(Color(red: 1, green: 0.2, blue: 0.4).opacity(fade * 0.5)), style: StrokeStyle(lineWidth: 9 * mapper.scale * fade, lineCap: .round))
+            glow.stroke(path, with: .color(.white.opacity(fade)), style: StrokeStyle(lineWidth: max(1, 1.6 * mapper.scale), lineCap: .round))
+        }
+    }
+
     private func drawProjectile(_ projectile: Projectile, in context: inout GraphicsContext, mapper: WorldMapper) {
         let s = mapper.scale
         if projectile.burrowTimeLeft != nil { return }
@@ -699,7 +712,18 @@ struct BattlefieldView: View {
         let t = explosion.progress
         let fade = 1 - t
 
-        if explosion.isDirt {
+        if explosion.style == .plasma {
+            let r = explosion.radius * mapper.scale * (0.4 + 0.9 * min(t * 3, 1))
+            var glow = context
+            glow.blendMode = .plusLighter
+            glow.fill(Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)), with: .radialGradient(
+                Gradient(colors: [.white.opacity(fade), Color(red: 0.7, green: 0.5, blue: 1).opacity(fade * 0.9), .cyan.opacity(fade * 0.4), .clear]),
+                center: center, startRadius: 0, endRadius: r))
+            glow.stroke(Path(ellipseIn: CGRect(x: center.x - r * 1.2, y: center.y - r * 1.2, width: r * 2.4, height: r * 2.4)),
+                        with: .color(.cyan.opacity(fade * 0.6)), lineWidth: 2 * mapper.scale)
+            return
+        }
+        if explosion.style == .dirt {
             let r = explosion.radius * mapper.scale * (0.5 + 0.5 * t)
             context.fill(Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)),
                          with: .radialGradient(Gradient(colors: [Color(red: 0.4, green: 0.28, blue: 0.15).opacity(fade * 0.7), .clear]),

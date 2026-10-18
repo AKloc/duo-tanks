@@ -116,7 +116,7 @@ enum ComputerPlayer {
         let wishlist: [ShopItem] = switch difficulty {
         case .easy: [.weapon(.missile), .weapon(.dirtClod), .parachute, .weapon(.babyNuke), .weapon(.funkyBomb), .weapon(.roller)].shuffled()
         case .normal: [.parachute, .weapon(.missile), .shield, .weapon(.mirv), .weapon(.babyNuke), .weapon(.roller), .repairKit, .weapon(.nuke)]
-        case .hard: [.shield, .parachute, .weapon(.mirv), .weapon(.missile), .repairKit, .weapon(.babyNuke), .weapon(.nuke), .weapon(.deathsHead), .weapon(.roller)]
+        case .hard: [.shield, .parachute, .weapon(.mirv), .weapon(.missile), .repairKit, .weapon(.plasmaBlast), .weapon(.babyNuke), .weapon(.nuke), .weapon(.deathsHead), .weapon(.heavyRoller)]
         }
         var purchases = 0
         var bought = true
@@ -148,7 +148,9 @@ enum ComputerPlayer {
         if distance > 180, target.health > 70, has(.nuke) { return .nuke }
         if distance > 140, target.health > 50, has(.deathsHead) { return .deathsHead }
         if distance > 120, has(.mirv), Bool.random() { return .mirv }
+        if isInValley, has(.heavyRoller) { return .heavyRoller }
         if isInValley, has(.roller) { return .roller }
+        if distance > 120, target.health > 60, has(.plasmaBlast) { return .plasmaBlast }
         if distance > 120, target.health > 40, has(.babyNuke) { return .babyNuke }
         if target.health <= 60, has(.missile) { return .missile }
         if has(.funkyBomb), Double.random(in: 0...1) < 0.3 { return .funkyBomb }

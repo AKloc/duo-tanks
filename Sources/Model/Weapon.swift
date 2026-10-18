@@ -10,7 +10,13 @@ enum WeaponBehavior {
     /// Tunnels through the ground, then explodes.
     case burrow
     /// Spreads burning fuel that flows downhill.
-    case napalm
+    case napalm(flames: Int, burnTime: ClosedRange<Double>)
+    /// Dirt that flows downhill and pools level in the nearest valley.
+    case liquidDirt(volume: Double)
+    /// A large energy blast with no fire or lingering smoke.
+    case plasma
+    /// A straight beam that ignores gravity and wind and burns through the ground.
+    case laser
     /// Explodes, then bounces on to explode again.
     case bounce(times: Int)
     /// Draws its path and does nothing else.
@@ -22,14 +28,16 @@ enum WeaponBehavior {
 enum Weapon: String, CaseIterable, Identifiable {
     case babyMissile, missile, babyNuke, nuke, mirv, deathsHead, funkyBomb
     case roller, sandhog, napalm, leapfrog, dirtClod, riotCharge, tracer
+    case heavyRoller, hotNapalm, tonOfDirt, liquidDirt, plasmaBlast, laser
     case mirvWarhead, deathsHeadWarhead, funkyBomblet
 
     var id: Self { self }
 
     /// Weapons a player can own and fire, in menu order.
     static let arsenal: [Weapon] = [
-        .babyMissile, .missile, .babyNuke, .nuke, .mirv, .deathsHead, .funkyBomb,
-        .roller, .sandhog, .napalm, .leapfrog, .dirtClod, .riotCharge, .tracer,
+        .babyMissile, .missile, .babyNuke, .nuke, .mirv, .deathsHead, .funkyBomb, .plasmaBlast, .laser,
+        .roller, .heavyRoller, .sandhog, .napalm, .hotNapalm, .leapfrog,
+        .dirtClod, .tonOfDirt, .liquidDirt, .riotCharge, .tracer,
     ]
 
     var name: String {
@@ -48,6 +56,12 @@ enum Weapon: String, CaseIterable, Identifiable {
         case .dirtClod: "Dirt Clod"
         case .riotCharge: "Riot Charge"
         case .tracer: "Tracer"
+        case .heavyRoller: "Heavy Roller"
+        case .hotNapalm: "Hot Napalm"
+        case .tonOfDirt: "Ton of Dirt"
+        case .liquidDirt: "Liquid Dirt"
+        case .plasmaBlast: "Plasma Blast"
+        case .laser: "Laser"
         case .mirvWarhead, .deathsHeadWarhead: "Warhead"
         case .funkyBomblet: "Bomblet"
         }
@@ -72,6 +86,12 @@ enum Weapon: String, CaseIterable, Identifiable {
         case .dirtClod: 38
         case .riotCharge: 34
         case .tracer: 0
+        case .heavyRoller: 50
+        case .hotNapalm: 12
+        case .tonOfDirt: 75
+        case .liquidDirt: 12
+        case .plasmaBlast: 70
+        case .laser: 4
         }
     }
 
@@ -89,7 +109,10 @@ enum Weapon: String, CaseIterable, Identifiable {
         case .roller: 70
         case .sandhog: 55
         case .leapfrog: 45
-        case .napalm, .dirtClod, .riotCharge, .tracer: 0
+        case .heavyRoller: 100
+        case .plasmaBlast: 90
+        case .laser: 90
+        case .napalm, .hotNapalm, .dirtClod, .tonOfDirt, .liquidDirt, .riotCharge, .tracer: 0
         }
     }
 
@@ -98,10 +121,14 @@ enum Weapon: String, CaseIterable, Identifiable {
         case .mirv: .splitAtApex(count: 5, child: .mirvWarhead)
         case .deathsHead: .splitAtApex(count: 9, child: .deathsHeadWarhead)
         case .funkyBomb: .scatterOnImpact(count: 7, child: .funkyBomblet)
-        case .dirtClod: .dirt
-        case .roller: .roll
+        case .dirtClod, .tonOfDirt: .dirt
+        case .roller, .heavyRoller: .roll
         case .sandhog: .burrow
-        case .napalm: .napalm
+        case .napalm: .napalm(flames: 9, burnTime: 3.5...4.5)
+        case .hotNapalm: .napalm(flames: 15, burnTime: 5...6.5)
+        case .liquidDirt: .liquidDirt(volume: 2_800)
+        case .plasmaBlast: .plasma
+        case .laser: .laser
         case .leapfrog: .bounce(times: 2)
         case .tracer: .tracer
         case .riotCharge: .riot

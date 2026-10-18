@@ -85,6 +85,39 @@ struct Terrain {
         }
     }
 
+    /// Pours dirt that runs downhill from `x` and settles level in the basin it reaches.
+    mutating func pourLiquid(at x: Double, volume: Double, reach: Int = 180) {
+        var bottom = min(max(Int(x.rounded()), 0), width - 1)
+        for _ in 0..<reach {
+            let left = bottom > 0 ? heights[bottom - 1] : .infinity
+            let right = bottom < width - 1 ? heights[bottom + 1] : .infinity
+            guard min(left, right) < heights[bottom] else { break }
+            bottom += left < right ? -1 : 1
+        }
+        let lo = max(0, bottom - reach), hi = min(width - 1, bottom + reach)
+
+        func basin(below level: Double) -> ClosedRange<Int> {
+            var start = bottom, end = bottom
+            while start > lo, heights[start - 1] < level { start -= 1 }
+            while end < hi, heights[end + 1] < level { end += 1 }
+            return start...end
+        }
+        func filled(to level: Double) -> Double {
+            basin(below: level).reduce(0) { $0 + max(0, level - heights[$1]) }
+        }
+
+        var low = heights[bottom], high = heights[bottom] + volume
+        for _ in 0..<40 {
+            let mid = (low + high) / 2
+            if filled(to: mid) < volume { low = mid } else { high = mid }
+        }
+        let level = min(low, maxHeight * 0.95)
+        for i in basin(below: level) where heights[i] < level {
+            heights[i] = level
+            grass[i] = 0
+        }
+    }
+
     mutating func flatten(around x: Double, halfWidth: Int) {
         let center = Int(x.rounded())
         let range = max(0, center - halfWidth)...min(width - 1, center + halfWidth)

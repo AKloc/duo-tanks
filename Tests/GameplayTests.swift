@@ -89,6 +89,23 @@ struct GameplayTests {
         #expect(game.camera == nil)
     }
 
+    @Test func aLaserFliesStraightThroughTheWindAndHits() {
+        let game = makeGame(wind: 40)
+        game.fireForTesting(weapon: .laser, angle: 0, power: 10)
+        game.runUntilSettled()
+        #expect((88...91).contains(100 - game.tanks[1].health))
+        #expect(game.tanks[0].health == 100)
+    }
+
+    @Test func plasmaHurtsWithoutScorchingTheGround() throws {
+        let game = makeGame()
+        let aim = try aimAtOpponent(in: game)
+        game.fireForTesting(weapon: .plasmaBlast, angle: aim.angle, power: aim.power)
+        game.runUntilSettled()
+        #expect(game.tanks[1].health < 15)
+        #expect(!game.terrain.scorchMarks.contains { $0.radius == Weapon.plasmaBlast.blastRadius }, "only the wreck's own blast scorches")
+    }
+
     @Test func theShopChargesAndStocksItems() throws {
         let game = makeGame()
         game.setHealth(1, ofTank: 1)

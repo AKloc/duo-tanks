@@ -24,6 +24,11 @@ final class SoundEngine {
         return crack + roll
     }
 
+    private lazy var laserBuffer = makeBuffer(duration: 0.45) { t, noise in
+        let sweep = 2400 * exp(-t * 5) + 260
+        return sin(2 * .pi * sweep * t) * exp(-t * 4) + noise.lowPass(0.4) * 0.25 * exp(-t * 10)
+    }
+
     var volume = 0.8 {
         didSet { engine.mainMixerNode.outputVolume = Float(volume) }
     }
@@ -52,6 +57,10 @@ final class SoundEngine {
         let buffer = explosionBuffers[key] ?? makeExplosion(radius: radius)
         explosionBuffers[key] = buffer
         play(buffer, atX: x, volume: Float(min(1, 0.55 + radius / 120)))
+    }
+
+    func laser(atX x: Double) {
+        play(laserBuffer, atX: x, volume: 0.7)
     }
 
     func thunder(atX x: Double) {

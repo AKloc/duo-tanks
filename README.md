@@ -35,11 +35,17 @@ You earn **$40 per point of damage** to opponents, **$2,500 per kill** (includin
 | MIRV | $8,000 | 50 each | Splits into 5 warheads at the top of its arc |
 | Death's Head | $16,000 | 70 each | Splits into 9 heavy warheads |
 | Funky Bomb | $7,000 | 60 + 40 per bomblet | Scatters bomblets on impact |
+| Plasma Blast | $9,000 | 90 | A huge energy blast; no fire, no smoke |
+| Laser | $10,000 | 90 | A straight beam that ignores gravity and wind and burns through hills |
 | Roller | $4,000 for 2 | 70 | Rolls downhill, then explodes |
+| Heavy Roller | $7,000 | 100 | A bigger, deadlier Roller |
 | Sandhog | $4,000 for 2 | 55 | Tunnels under the target, then explodes |
 | Napalm | $7,000 | burns | Burning fuel that flows downhill |
+| Hot Napalm | $11,000 | burns | More fuel that burns hotter and longer |
 | Leapfrog | $5,000 for 2 | 45 × 3 | Bounces twice, exploding each time |
 | Dirt Clod | $2,000 for 3 | 0 | A ball of dirt; bury your opponent |
+| Ton of Dirt | $4,000 | 0 | A huge mound; bury them completely |
+| Liquid Dirt | $4,000 for 2 | 0 | Flows downhill and fills the valley level |
 | Riot Charge | $2,000 for 2 | 0 | Blasts away dirt in front of you |
 | Tracer | $500 for 5 | 0 | Leaves its path on screen for aiming |
 
@@ -87,6 +93,14 @@ open DuoTanks.xcodeproj
 ```
 
 Pick the **iPhone Duo** simulator or your device and press Run. To install on a real phone, set your team under Signing & Capabilities.
+
+## App icon
+
+The icon is drawn in code by `Tools/make_icon.swift`. To regenerate it:
+
+```sh
+swift Tools/make_icon.swift Sources/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+```
 
 ## Tests
 

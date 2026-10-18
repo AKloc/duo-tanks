@@ -36,6 +36,20 @@ struct TerrainTests {
         #expect(terrain.scorchMarks.count == 1)
     }
 
+    @Test func liquidDirtRunsDownhillAndFillsTheValleyLevel() {
+        // A V-shaped valley bottoming out at x = 500, 50 units deep.
+        let heights = (0..<1000).map { x in 100 + min(50, abs(Double(x) - 500) * 0.5) }
+        var terrain = Terrain(heights: heights)
+        let before = terrain.heights.reduce(0, +)
+        terrain.pourLiquid(at: 470, volume: 1_000)
+        let added = terrain.heights.reduce(0, +) - before
+        #expect(abs(added - 1_000) < 5)
+        let level = terrain.height(at: 500)
+        #expect(level > 100)
+        #expect(abs(terrain.height(at: 490) - level) < 0.01, "the pool's surface is flat")
+        #expect(terrain.height(at: 300) == 150, "the hillsides above the pool are untouched")
+    }
+
     @Test func flatteningLevelsTheGroundToItsAverage() {
         var heights = Array(repeating: 100.0, count: 1000)
         heights[500] = 130

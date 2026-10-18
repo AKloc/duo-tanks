@@ -122,6 +122,12 @@ enum ShopItem: Hashable, Identifiable {
             case .dirtClod: 2_000
             case .riotCharge: 2_000
             case .tracer: 500
+            case .heavyRoller: 7_000
+            case .hotNapalm: 11_000
+            case .tonOfDirt: 4_000
+            case .liquidDirt: 4_000
+            case .plasmaBlast: 9_000
+            case .laser: 10_000
             default: 0
             }
         case .parachute: 3_000
@@ -137,7 +143,7 @@ enum ShopItem: Hashable, Identifiable {
         case let .weapon(weapon):
             switch weapon {
             case .missile, .dirtClod: 3
-            case .roller, .sandhog, .leapfrog, .riotCharge: 2
+            case .roller, .sandhog, .leapfrog, .riotCharge, .liquidDirt: 2
             case .tracer: 5
             default: 1
             }
@@ -164,6 +170,12 @@ enum ShopItem: Hashable, Identifiable {
             case .dirtClod: "A ball of dirt. Bury your opponent."
             case .riotCharge: "Blasts away dirt in front of you."
             case .tracer: "No damage. Leaves its path on screen."
+            case .heavyRoller: "A bigger, deadlier Roller."
+            case .hotNapalm: "More fuel that burns hotter and longer."
+            case .tonOfDirt: "A huge mound of dirt. Bury them completely."
+            case .liquidDirt: "Flows downhill and fills the valley it lands in."
+            case .plasmaBlast: "A huge energy blast. No fire, no smoke."
+            case .laser: "A straight beam. Ignores gravity and wind, burns through hills."
             default: ""
             }
         case .parachute: "Opens automatically when you fall. No fall damage."
@@ -187,6 +199,12 @@ enum ShopItem: Hashable, Identifiable {
             case .dirtClod: "mountain.2"
             case .riotCharge: "wind"
             case .tracer: "scribble"
+            case .heavyRoller: "circle.circle.fill"
+            case .hotNapalm: "flame.fill"
+            case .tonOfDirt: "mountain.2.fill"
+            case .liquidDirt: "drop.fill"
+            case .plasmaBlast: "bolt.circle.fill"
+            case .laser: "line.diagonal"
             default: "scope"
             }
         case .parachute: "umbrella.fill"
