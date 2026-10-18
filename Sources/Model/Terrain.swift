@@ -2,7 +2,12 @@ import Foundation
 
 /// Ground stored as one height per world-unit column, measured up from the bottom.
 struct Terrain {
+    static let maxScorchMarks = 40
+
     private(set) var heights: [Double]
+    /// 0...1 grass cover per column; blasts burn it away and fresh dirt has none.
+    private(set) var grass: [Double]
+    private(set) var scorchMarks: [(center: Vec, radius: Double)] = []
     let maxHeight: Double
 
     var width: Int { heights.count }
@@ -22,6 +27,7 @@ struct Terrain {
             let h = layers.reduce(base) { $0 + $1.amplitude * sin(t * $1.frequency + $1.phase) }
             return min(max(h, maxHeight * 0.06), maxHeight * 0.75)
         }
+        grass = Array(repeating: 1, count: width)
     }
 
     func height(at x: Double) -> Double {
@@ -37,12 +43,20 @@ struct Terrain {
             guard h > span.bottom else { continue }
             heights[span.column] = span.bottom + max(0, h - span.top)
         }
+        let burn = radius * 1.5
+        for i in max(0, Int(center.x - burn))...min(width - 1, Int(center.x + burn)) {
+            let distance = abs(Double(i) - center.x) / burn
+            grass[i] = min(grass[i], max(0, (distance - 0.75) / 0.25))
+        }
+        scorchMarks.append((center, radius))
+        if scorchMarks.count > Terrain.maxScorchMarks { scorchMarks.removeFirst() }
     }
 
     /// Drops a circle's worth of dirt onto each column it covers.
     mutating func addDirt(center: Vec, radius: Double) {
         for span in spans(center: center, radius: radius) {
             heights[span.column] = min(heights[span.column] + span.top - span.bottom, maxHeight * 0.95)
+            grass[span.column] = 0
         }
     }
 

@@ -54,6 +54,7 @@ struct Projectile: Identifiable {
     let ownerID: Int
     var age = 0.0
     var trail: [Vec] = []
+    var smokeTimer = 0.0
 }
 
 struct Explosion: Identifiable {
@@ -66,6 +67,17 @@ struct Explosion: Identifiable {
     var age = 0.0
 
     var progress: Double { min(age / Explosion.duration, 1) }
+}
+
+/// A crater that keeps trickling smoke for a while after the blast.
+struct Smolder {
+    let x: Double
+    let spread: Double
+    let duration: Double
+    var remaining: Double
+    var timer = 0.0
+
+    var intensity: Double { remaining / duration }
 }
 
 enum Phase: Equatable {
@@ -102,8 +114,11 @@ final class Game {
 
     @ObservationIgnored private let sound = SoundEngine()
     @ObservationIgnored private let haptics = UIImpactFeedbackGenerator(style: .heavy)
+    @ObservationIgnored private let rumble = ChargeRumble()
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var chargeStartedAt: ContinuousClock.Instant?
+    @ObservationIgnored private var smolders: [Smolder] = []
+    @ObservationIgnored private var tankSmokeTimers: [Int: Double] = [:]
 
     var current: Tank { tanks[currentIndex] }
 
@@ -130,8 +145,11 @@ final class Game {
         explosions = []
         particles = []
         floatingTexts = []
+        smolders = []
+        tankSmokeTimers = [:]
         chargeStartedAt = nil
         chargePower = nil
+        rumble.stop()
         shake = 0
         flash = 0
         currentIndex = Int.random(in: tanks.indices)
@@ -162,6 +180,7 @@ final class Game {
         guard phase == .aiming, chargeStartedAt == nil else { return }
         chargeStartedAt = .now
         chargePower = 0
+        rumble.start()
         startLoop()
     }
 
@@ -170,6 +189,7 @@ final class Game {
         let power = min((ContinuousClock.now - start).seconds * Game.chargeRate, 100).rounded()
         chargeStartedAt = nil
         chargePower = nil
+        rumble.stop()
         tanks[currentIndex].power = power
         fire()
     }
@@ -223,7 +243,9 @@ final class Game {
     /// Returns false once nothing is moving and the loop can stop.
     private func advance(by dt: Double) -> Bool {
         if let start = chargeStartedAt {
-            chargePower = min((ContinuousClock.now - start).seconds * Game.chargeRate, 100).rounded()
+            let power = min((ContinuousClock.now - start).seconds * Game.chargeRate, 100)
+            chargePower = power.rounded()
+            rumble.update(fraction: power / 100)
         }
 
         if phase == .firing {
@@ -243,7 +265,8 @@ final class Game {
             endTurn()
         }
 
-        let isAnimating = !particles.isEmpty || !floatingTexts.isEmpty || !explosions.isEmpty || shake > 0.01 || flash > 0.01
+        let isSmoking = !smolders.isEmpty || tanks.contains { $0.health < 50 }
+        let isAnimating = isSmoking || !particles.isEmpty || !floatingTexts.isEmpty || !explosions.isEmpty || shake > 0.01 || flash > 0.01
         if !isAnimating && phase != .firing && chargeStartedAt == nil {
             shake = 0
             flash = 0
@@ -258,6 +281,11 @@ final class Game {
             p.velocity += Vec(wind, -Game.gravity) * dt
             p.position += p.velocity * dt
             p.age += dt
+            p.smokeTimer += dt
+            if p.smokeTimer >= 0.035 {
+                p.smokeTimer = 0
+                particles.append(ParticleFactory.shellSmoke(at: p.position))
+            }
             if p.trail.last.map({ ($0 - p.position).length > 5 }) ?? true {
                 p.trail.append(p.position)
                 if p.trail.count > Projectile.maxTrail { p.trail.removeFirst() }
@@ -321,6 +349,8 @@ final class Game {
         haptics.impactOccurred(intensity: min(1, 0.4 + radius / 80))
         shake = min(1, max(shake, radius / 70))
         if radius >= 50 { flash = max(flash, min(1, radius / 100)) }
+        let smolderTime = 4 + radius / 25
+        smolders.append(Smolder(x: center.x, spread: radius * 0.4, duration: smolderTime, remaining: smolderTime))
 
         let reach = radius + Tank.hitRadius
         for i in tanks.indices where tanks[i].isAlive {
@@ -376,16 +406,62 @@ final class Game {
                 p.velocity.x += wind * dt
             case .smoke:
                 p.velocity.x += wind * 0.5 * dt
+            case .fire:
+                p.velocity *= 1 - 1.8 * dt
+                p.velocity.y += 25 * dt
+                p.velocity.x += wind * 0.3 * dt
             }
             p.position += p.velocity * dt
             if p.kind == .debris, p.position.y < terrain.height(at: p.position.x) { p.age = p.lifetime }
             particles[i] = p
         }
         particles.removeAll { $0.age >= $0.lifetime }
-        if particles.count > 600 { particles.removeFirst(particles.count - 600) }
+        if particles.count > 900 { particles.removeFirst(particles.count - 900) }
+
+        emitLingeringSmoke(dt)
 
         shake *= exp(-5 * dt)
         flash *= exp(-6 * dt)
+    }
+
+    private func emitLingeringSmoke(_ dt: Double) {
+        for i in smolders.indices {
+            smolders[i].remaining -= dt
+            smolders[i].timer += dt
+            let intensity = smolders[i].intensity
+            guard smolders[i].timer >= 0.08 / max(intensity, 0.15) else { continue }
+            smolders[i].timer = 0
+            let x = smolders[i].x + Double.random(in: -smolders[i].spread...smolders[i].spread)
+            let ground = Vec(x, terrain.height(at: x) + 1)
+            particles.append(Particle(
+                kind: .smoke,
+                position: ground,
+                velocity: Vec(wind * 0.15 + Double.random(in: -3...3), Double.random(in: 10...20)),
+                lifetime: Double.random(in: 2...3.2),
+                size: Double.random(in: 2.5...5) * (0.5 + intensity * 0.5),
+                color: Color(white: 0.45)
+            ))
+            if intensity > 0.7, Double.random(in: 0...1) < 0.25 {
+                particles.append(Particle(kind: .spark, position: ground, velocity: Vec(Double.random(in: -15...15), Double.random(in: 20...50)),
+                                          lifetime: Double.random(in: 0.4...0.8), size: 1, color: .orange))
+            }
+        }
+        smolders.removeAll { $0.remaining <= 0 }
+
+        for tank in tanks where tank.health < 50 {
+            let interval = !tank.isAlive ? 0.08 : tank.health < 25 ? 0.14 : 0.35
+            tankSmokeTimers[tank.id, default: 0] += dt
+            guard tankSmokeTimers[tank.id, default: 0] >= interval else { continue }
+            tankSmokeTimers[tank.id] = 0
+            particles.append(Particle(
+                kind: .smoke,
+                position: tank.turretCenter + Vec(Double.random(in: -4...4), 3),
+                velocity: Vec(wind * 0.2 + Double.random(in: -3...3), Double.random(in: 12...22)),
+                lifetime: Double.random(in: 1.6...2.6),
+                size: Double.random(in: 2...4) * (tank.isAlive ? 1 : 1.5),
+                color: Color(white: tank.isAlive ? 0.35 : 0.18)
+            ))
+        }
     }
 
     private func endTurn() {

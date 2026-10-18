@@ -146,7 +146,7 @@ struct ArcadeButton: View {
                 isPressed = false
                 onRelease()
             })
-        .sensoryFeedback(.impact(weight: .medium), trigger: isPressed) { _, pressed in pressed }
+        .sensoryFeedback(.impact(weight: .heavy, intensity: 1), trigger: isPressed) { _, pressed in pressed }
         .accessibilityLabel("Fire")
         .accessibilityHint("Hold to charge power, release to fire")
     }

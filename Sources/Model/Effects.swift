@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct Particle {
-    enum Kind { case spark, debris, smoke }
+    enum Kind { case spark, debris, smoke, fire }
 
     let kind: Kind
     var position: Vec
@@ -48,17 +48,39 @@ enum ParticleFactory {
                 color: Color(red: Double.random(in: 0.3...0.45), green: Double.random(in: 0.2...0.3), blue: 0.1)
             )
         }
-        let smoke = (0..<Int(3 + radius / 10)).map { _ in
+        let fire = (0..<Int(8 + radius / 3)).map { _ in
+            let direction = randomDirection(upward: false)
+            return Particle(
+                kind: .fire,
+                position: center + direction * Double.random(in: 0...(radius * 0.35)),
+                velocity: direction * Double.random(in: 20...(60 + radius * 1.5)) + Vec(0, 20),
+                lifetime: Double.random(in: 0.6...1.1),
+                size: Double.random(in: (radius * 0.22)...(radius * 0.45)),
+                color: .orange
+            )
+        }
+        let smoke = (0..<Int(4 + radius / 6)).map { _ in
             Particle(
                 kind: .smoke,
                 position: center + randomDirection(upward: false) * Double.random(in: 0...(radius * 0.5)),
-                velocity: Vec(Double.random(in: -12...12), Double.random(in: 15...40)),
-                lifetime: Double.random(in: 1.2...2.2),
-                size: Double.random(in: radius * 0.3...radius * 0.6),
-                color: .gray
+                velocity: Vec(Double.random(in: -10...10), Double.random(in: 20...45)),
+                lifetime: Double.random(in: 1.8...3.2),
+                size: Double.random(in: (radius * 0.35)...(radius * 0.7)),
+                color: Color(white: 0.22)
             )
         }
-        return sparks + debris + smoke
+        return sparks + debris + fire + smoke
+    }
+
+    static func shellSmoke(at point: Vec) -> Particle {
+        Particle(
+            kind: .smoke,
+            position: point,
+            velocity: Vec(Double.random(in: -4...4), Double.random(in: 4...10)),
+            lifetime: Double.random(in: 0.9...1.6),
+            size: Double.random(in: 1.6...3),
+            color: Color(white: 0.7)
+        )
     }
 
     static func dirt(at center: Vec, radius: Double) -> [Particle] {
