@@ -7,6 +7,7 @@ struct GameView: View {
 
     @State private var hinge: HingeState?
     @State private var showsBriefing = false
+    @Environment(\.scenePhase) private var scenePhase
     @State private var isFaceUp = false
     @State private var director = DirectorCamera()
     @State private var handoffPlayerID: Int?
@@ -88,6 +89,10 @@ struct GameView: View {
         .background(Color(red: 0.05, green: 0.06, blue: 0.2).ignoresSafeArea())
         .background(HingeReader { hinge = $0 })
         .onChange(of: turnToken, initial: true) { _, _ in requestHandoff() }
+        .onChange(of: game.phase, initial: true) { _, _ in persist() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { persist() }
+        }
         .onChange(of: hinge) { oldValue, newValue in
             if handoffPlayerID != nil {
                 // Folding hands the phone over; opening it again starts the turn. Only a real fold from
@@ -112,6 +117,16 @@ struct GameView: View {
         }
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
+    }
+
+    /// Quick matches save at the start of every turn and between rounds; a finished match clears its save.
+    private func persist() {
+        guard game.mission == nil else { return }
+        if game.phase == .matchOver {
+            MatchStore.clear()
+        } else if let snapshot = game.snapshot() {
+            MatchStore.save(snapshot)
+        }
     }
 
     private func requestHandoff() {

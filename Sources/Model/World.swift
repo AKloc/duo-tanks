@@ -1,6 +1,6 @@
 import Foundation
 
-enum WorldTheme: String, CaseIterable, Identifiable {
+enum WorldTheme: String, CaseIterable, Identifiable, Codable {
     case hills, desert, snow, moon, aerie, forge
 
     var id: Self { self }
@@ -35,7 +35,7 @@ enum WorldTheme: String, CaseIterable, Identifiable {
     }
 }
 
-enum WorldChoice: String, CaseIterable, Identifiable {
+enum WorldChoice: String, CaseIterable, Identifiable, Codable {
     case random, hills, desert, snow, moon, aerie, forge
 
     var id: Self { self }
@@ -44,8 +44,8 @@ enum WorldChoice: String, CaseIterable, Identifiable {
     var name: String { theme?.name ?? "Random" }
 }
 
-struct Weather: Equatable {
-    enum Precipitation { case none, rain, snow }
+struct Weather: Equatable, Codable {
+    enum Precipitation: Codable { case none, rain, snow }
 
     var precipitation = Precipitation.none
     var hasLightning = false
@@ -53,7 +53,7 @@ struct Weather: Equatable {
     static let clear = Weather()
 }
 
-enum WeatherSetting: String, CaseIterable, Identifiable {
+enum WeatherSetting: String, CaseIterable, Identifiable, Codable {
     case auto, clear, rain, storm
 
     var id: Self { self }
@@ -77,7 +77,7 @@ enum WeatherSetting: String, CaseIterable, Identifiable {
     }
 }
 
-enum WindSetting: String, CaseIterable, Identifiable {
+enum WindSetting: String, CaseIterable, Identifiable, Codable {
     case off, light, normal, strong
 
     var id: Self { self }
@@ -93,7 +93,7 @@ enum WindSetting: String, CaseIterable, Identifiable {
     }
 }
 
-enum Roughness: String, CaseIterable, Identifiable {
+enum Roughness: String, CaseIterable, Identifiable, Codable {
     case smooth, rolling, rugged
 
     var id: Self { self }

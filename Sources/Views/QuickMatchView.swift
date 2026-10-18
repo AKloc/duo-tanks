@@ -90,9 +90,11 @@ struct QuickMatchView: View {
             Spacer()
             Text("QUICK MATCH")
                 .font(.system(size: 30, weight: .black).width(.expanded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 .foregroundStyle(LinearGradient(colors: [Color(white: 0.97), Color(white: 0.72)], startPoint: .top, endPoint: .bottom))
             Spacer()
-            Color.clear.frame(width: 80, height: 1)
+            Color.clear.frame(width: 60, height: 1)
         }
         .padding(.top, 20)
     }

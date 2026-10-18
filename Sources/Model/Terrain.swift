@@ -2,7 +2,7 @@ import Foundation
 
 /// A floating island: one solid span of rock per column, in its own coordinates, placed at `offset`.
 /// Islands sway around `home` between turns.
-struct Island: Identifiable, Sendable {
+struct Island: Identifiable, Sendable, Codable {
     let id: Int
     var offset: Vec
     var bottoms: [Double]
@@ -34,13 +34,13 @@ struct Island: Identifiable, Sendable {
 }
 
 /// A column of rising air that pushes shells upward.
-struct Updraft: Sendable {
+struct Updraft: Sendable, Codable {
     let x: ClosedRange<Double>
     let strength: Double
 }
 
 /// A point of intense gravity that bends shots toward it and swallows anything that gets too close.
-struct GravityWell: Sendable {
+struct GravityWell: Sendable, Codable {
     static let coreRadius = 14.0
 
     let center: Vec
@@ -56,13 +56,19 @@ struct GravityWell: Sendable {
 }
 
 /// The ground, stored as one height per world-unit column measured up from the bottom, plus any floating islands.
-struct Terrain: Sendable {
+/// A burn mark left on the ground by a blast.
+struct ScorchMark: Sendable, Codable {
+    let center: Vec
+    let radius: Double
+}
+
+struct Terrain: Sendable, Codable {
     static let maxScorchMarks = 40
 
     private(set) var heights: [Double]
     /// 0...1 grass cover per column; blasts burn it away and fresh dirt has none.
     private(set) var grass: [Double]
-    private(set) var scorchMarks: [(center: Vec, radius: Double)] = []
+    private(set) var scorchMarks: [ScorchMark] = []
     private(set) var islands: [Island] = []
     private(set) var updrafts: [Updraft] = []
     /// The ground is a bottomless sea of clouds rather than solid earth.
@@ -249,7 +255,7 @@ struct Terrain: Sendable {
         islands.removeAll { !$0.hasRock }
         guard leavesScorch else { return }
         burnGrass(around: center.x, radius: radius * 1.5)
-        scorchMarks.append((center, radius))
+        scorchMarks.append(ScorchMark(center: center, radius: radius))
         if scorchMarks.count > Terrain.maxScorchMarks { scorchMarks.removeFirst() }
     }
 

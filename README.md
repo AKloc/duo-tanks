@@ -8,6 +8,7 @@ A classic turn-based artillery game for the iPhone Duo. Lob shells across destru
 - Two players on one phone, or against the computer (Easy, Normal, Hard)
 - Multi-round matches with a shop: 21 weapons including MIRVs, Nukes, Napalm, Rollers, Lasers and Black Holes, plus shields, parachutes, repair kits and fuel
 - Destructible terrain, wind, falling damage, burial and driving
+- Tour progress is saved, and quick matches save every turn so you can resume them from the main menu
 - Six worlds for quick matches, including the Volcanic Forge, the low-gravity Moon and the Floating Isles; weather, a kill cam and dynamic music
 
 ## Built for the Duo

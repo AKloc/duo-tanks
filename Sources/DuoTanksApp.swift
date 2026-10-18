@@ -30,8 +30,11 @@ struct RootView: View {
         Group {
             switch screen {
             case .menu:
+                let saved = MatchStore.load()
                 MainMenuView(onContinueTour: { play($0, tourDifficulty) }, onTourMap: { screen = .tour },
-                             onQuickMatch: { screen = .quickMatch }, onResumeMatch: nil, resumeSummary: nil)
+                             onQuickMatch: { screen = .quickMatch },
+                             onResumeMatch: saved.map { match in { screen = .playing(Game(restoring: match), fromTour: false) } },
+                             resumeSummary: saved?.summary)
             case .quickMatch:
                 QuickMatchView(onStart: { settings in screen = .playing(Game(settings: settings), fromTour: false) },
                                onBack: { screen = .menu })

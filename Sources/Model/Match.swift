@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct Inventory {
+struct Inventory: Codable {
     var ammo: [Weapon: Int] = [:]
     var parachutes = 0
     var shields = 0
@@ -57,7 +57,7 @@ struct Player: Identifiable {
     var isComputer: Bool { computer != nil }
 }
 
-struct MatchSettings {
+struct MatchSettings: Codable {
     var rounds = 5
     var startingMoney = 15_000
     var world = WorldChoice.random
@@ -82,7 +82,7 @@ struct MatchSettings {
 }
 
 /// Money earned this round, broken down for the results screen.
-struct RoundEarnings {
+struct RoundEarnings: Codable {
     var damage = 0
     var kills = 0
     var bonus = 0

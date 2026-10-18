@@ -25,7 +25,14 @@ struct CampaignPlaythroughTests {
         for attempt in 1...3 {
             if attempt > 1 { game.restartMission() }
             var turns = 0
+            var steps = 0
             while turns < 60 {
+                steps += 1
+                if steps > 200 {
+                    let tanks = game.tanks.map { "\($0.name) at \($0.position) slide \($0.slide) fall \($0.fallDistance) hp \(Int($0.health))" }
+                    Issue.record("\(mission.id) attempt \(attempt) got stuck in \(game.phase) after \(turns) turns: \(tanks.joined(separator: "; "))")
+                    return
+                }
                 if case .missionOver = game.phase { break }
                 if game.phase == .aiming {
                     turns += 1

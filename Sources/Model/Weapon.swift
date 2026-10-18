@@ -27,7 +27,7 @@ enum WeaponBehavior {
     case singularity
 }
 
-enum Weapon: String, CaseIterable, Identifiable {
+enum Weapon: String, CaseIterable, Identifiable, Codable {
     case babyMissile, missile, babyNuke, nuke, mirv, deathsHead, funkyBomb
     case roller, sandhog, napalm, leapfrog, dirtClod, riotCharge, tracer
     case heavyRoller, hotNapalm, tonOfDirt, liquidDirt, plasmaBlast, laser, blackHole

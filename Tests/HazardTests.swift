@@ -58,6 +58,16 @@ struct HazardTests {
         #expect(game.phase != .firing)
     }
 
+    @Test func aTankSlidingIntoTheEdgeOfTheWorldStops() {
+        let heights = (0..<1000).map { 100 + Double($0) * 0.9 }
+        var terrain = Terrain(heights: heights.map { min($0, 380) })
+        terrain.addHazards(isIcy: true)
+        let game = makeGame(terrain, tankXs: [500, 40])
+        game.fireForTesting(weapon: .missile, angle: 135, power: 30)
+        game.runUntilSettled(maxSeconds: 30)
+        #expect(game.phase != .firing)
+    }
+
     @Test func blastsSendTanksSlidingOnIce() {
         var terrain = Terrain(flatHeight: 100)
         terrain.addHazards(isIcy: true)

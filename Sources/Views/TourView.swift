@@ -42,6 +42,8 @@ struct TourView: View {
             VStack(spacing: 2) {
                 Text("THE TOUR")
                     .font(.system(size: 40, weight: .black).width(.expanded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                     .foregroundStyle(LinearGradient(colors: [Color(white: 0.97), Color(white: 0.72)], startPoint: .top, endPoint: .bottom))
                 Text("Five worlds. Five bosses. One tank.")
                     .font(.subheadline)

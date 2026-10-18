@@ -400,6 +400,81 @@ final class Game {
         startMission(mission, difficulty: difficulty)
     }
 
+    // MARK: Saving quick matches
+
+    /// The match as it stands, if it's at a point that can be saved: a quick match at the start of a turn or between rounds.
+    func snapshot() -> SavedMatch? {
+        guard mission == nil, projectiles.isEmpty, chargeStartedAt == nil else { return nil }
+        let moment: SavedMatch.Moment
+        switch phase {
+        case .aiming: moment = .turn
+        case let .roundOver(winnerID): moment = .roundOver(winnerID: winnerID)
+        case let .shopping(index): moment = .shopping(playerIndex: index)
+        default: return nil
+        }
+        // Save where drifting islands (and the tanks riding them) are headed, without disturbing the animation.
+        var settledTerrain = terrain
+        var settledTanks = tanks
+        if let drift = islandDrift {
+            for (id, target) in drift.to {
+                guard let island = terrain.islands.first(where: { $0.id == id }) else { continue }
+                settledTerrain.moveIsland(id: id, to: target)
+                for (index, rider) in drift.riders where rider == id && settledTanks.indices.contains(index) {
+                    settledTanks[index].position += target - island.offset
+                }
+            }
+        }
+        return SavedMatch(
+            settings: settings, theme: theme, weather: weather, gravity: gravity, maxWind: maxWind, wind: wind, terrain: settledTerrain,
+            tanks: settledTanks.map { tank in
+                .init(id: tank.id, name: tank.name, position: tank.position, health: tank.health, shield: tank.shield, angle: tank.angle,
+                      power: tank.power, inventory: tank.inventory, selectedWeapon: tank.selectedWeapon, hasTurret: tank.hasTurret)
+            },
+            players: players.map { .init(id: $0.id, name: $0.name, money: $0.money, wins: $0.wins, kills: $0.kills, inventory: $0.inventory, computer: $0.computer) },
+            round: round, currentIndex: currentIndex, moment: moment, roundEarnings: roundEarnings, savedAt: .now
+        )
+    }
+
+    /// Picks a saved quick match back up exactly where it was left.
+    convenience init(restoring saved: SavedMatch) {
+        self.init(settings: saved.settings)
+        resetBattlefield()
+        let color = { (id: Int) in id == 0 ? Color.red : .blue }
+        theme = saved.theme
+        weather = saved.weather
+        gravity = saved.gravity
+        maxWind = saved.maxWind
+        wind = saved.wind
+        terrain = saved.terrain
+        round = saved.round
+        roundEarnings = saved.roundEarnings
+        players = saved.players.map { player in
+            var restored = Player(id: player.id, name: player.name, color: color(player.id), money: player.money, computer: player.computer)
+            restored.wins = player.wins
+            restored.kills = player.kills
+            restored.inventory = player.inventory
+            return restored
+        }
+        tanks = saved.tanks.map { tank in
+            var restored = Tank(id: tank.id, name: tank.name, color: color(tank.id), position: tank.position, angle: tank.angle, inventory: tank.inventory)
+            restored.health = tank.health
+            restored.shield = tank.shield
+            restored.power = tank.power
+            restored.selectedWeapon = tank.selectedWeapon
+            restored.hasTurret = tank.hasTurret
+            return restored
+        }
+        currentIndex = min(saved.currentIndex, tanks.count - 1)
+        switch saved.moment {
+        case .turn: phase = .aiming
+        case let .roundOver(winnerID): phase = .roundOver(winnerID: winnerID)
+        case let .shopping(index): phase = .shopping(playerIndex: index)
+        }
+        sound.updateFlights([])
+        updateMusic()
+        scheduleComputerTurn()
+    }
+
     // MARK: Tour missions
 
     var aimPreviewFraction: Double {
@@ -1445,7 +1520,8 @@ final class Game {
                 continue
             }
             let nextX = min(max(x + tanks[i].slide * dt, 12), Game.worldSize.x - 12)
-            if terrain.support(at: nextX, y: y + 4) > y + 3 {
+            // Stop against the edge of the world or a wall.
+            if abs(nextX - x) < 0.001 || terrain.support(at: nextX, y: y + 4) > y + 3 {
                 tanks[i].slide = 0
                 continue
             }
