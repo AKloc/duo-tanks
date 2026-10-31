@@ -310,7 +310,7 @@ final class TourProgress {
         guard mission.chapter.isAvailable, isUnlocked(mission.chapter) else { return false }
         let missions = mission.chapter.missions
         guard let index = missions.firstIndex(of: mission), index > 0 else { return true }
-        return isBeaten(missions[index - 1]) || failures(for: missions[index - 1]) >= 3
+        return isBeaten(missions[index - 1])
     }
 
     /// A chapter opens once the previous chapter's boss is beaten.

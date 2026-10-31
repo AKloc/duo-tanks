@@ -129,20 +129,20 @@ struct MissionSetup {
             return MissionSetup(
                 terrain: Terrain(islands: [
                     Terrain.makeIsland(id: 0, x: 60, y: 200, width: 220, thickness: 60, seed: 26),
-                    Terrain.makeIsland(id: 1, x: 600, y: 250, width: 70, thickness: 18, hilliness: 2, seed: 27),
+                    Terrain.makeIsland(id: 1, x: 410, y: 370, width: 80, thickness: 250, hilliness: 4, seed: 34),
+                    Terrain.makeIsland(id: 2, x: 640, y: 230, width: 140, thickness: 36, hilliness: 4, seed: 27),
                 ]),
-                wind: 0...0, playerX: 160,
+                wind: 4...4, playerX: 160,
                 playerInventory: Inventory(ammo: [.missile: 2], fuel: 0, hasUnlimitedShells: false),
-                enemies: [EnemySpec(name: "Shielded Target", color: .orange, x: 635, health: 50, shield: 999, shieldCap: 999,
+                enemies: [EnemySpec(name: "Shielded Target", color: .orange, x: 710, health: 50, shield: 999, shieldCap: 999,
                                     isDummy: true, fixedHealth: true)]
             )
         case "aerie-4":
-            let sway = Vec(42, 24)
             return MissionSetup(
                 terrain: Terrain(islands: [
-                    Terrain.makeIsland(id: 0, x: 70, y: 200, width: 180, thickness: 60, sway: sway, seed: 28),
-                    Terrain.makeIsland(id: 1, x: 400, y: 140, width: 120, thickness: 50, sway: sway * 1.3, seed: 29),
-                    Terrain.makeIsland(id: 2, x: 650, y: 230, width: 200, thickness: 60, sway: sway, seed: 30),
+                    Terrain.makeIsland(id: 0, x: 70, y: 200, width: 180, thickness: 60, sway: Vec(42, 24), seed: 28),
+                    Terrain.makeIsland(id: 1, x: 400, y: 140, width: 120, thickness: 50, sway: Vec(55, -30), phase: 2.1, seed: 29),
+                    Terrain.makeIsland(id: 2, x: 650, y: 230, width: 200, thickness: 60, sway: Vec(-50, -30), phase: 2.4, seed: 30),
                 ]),
                 wind: -10...10, playerX: 160, playerInventory: .starting,
                 enemies: [EnemySpec(name: "Gunner", color: .blue, x: 750, health: 90)]

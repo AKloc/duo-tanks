@@ -417,7 +417,7 @@ struct Terrain: Sendable, Codable {
 
     /// A rounded slab with a gently hilly top and a tapering, rocky underside.
     static func makeIsland(id: Int, x: Double, y: Double, width: Int, thickness: Double, hilliness: Double = 12,
-                           sway: Vec = .zero, seed: UInt64) -> Island {
+                           sway: Vec = .zero, phase: Double = 0, seed: UInt64) -> Island {
         let noise = ValueNoise(seed: seed)
         let tops = (0..<width).map { i -> Double in
             let u = Double(i) / Double(max(width - 1, 1))
@@ -431,9 +431,10 @@ struct Terrain: Sendable, Codable {
             return -thickness * taper + jag * taper
         }
         let fixedBottoms = zip(bottoms, tops).map { min($0, $1 - 2) }
-        let home = Vec(x, y)
-        return Island(id: id, offset: home, bottoms: fixedBottoms, tops: tops, grass: Array(repeating: 1, count: width),
-                      home: home, sway: sway, phase: 0)
+        var island = Island(id: id, offset: Vec(x, y), bottoms: fixedBottoms, tops: tops, grass: Array(repeating: 1, count: width),
+                            home: Vec(x, y), sway: sway, phase: phase)
+        island.offset = island.position(atPhase: phase)
+        return island
     }
 
     private static func makeArchipelago(width: Int, roughness: Double,
@@ -450,6 +451,7 @@ struct Terrain: Sendable, Codable {
                 id: id, x: x, y: Double.random(in: 110...250, using: &generator), width: fits,
                 thickness: Double.random(in: 40...70, using: &generator), hilliness: 10 * roughness,
                 sway: Vec(Double.random(in: 8...22, using: &generator), Double.random(in: 5...14, using: &generator)),
+                phase: Double.random(in: 0...(2 * .pi), using: &generator),
                 seed: UInt64.random(in: 1...UInt64.max, using: &generator)
             ))
             id += 1

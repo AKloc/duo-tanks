@@ -66,8 +66,8 @@ final class SoundEngine {
         play(laserBuffer, atX: x, volume: 0.7)
     }
 
-    func setMusic(tension: Double, enabled: Bool, level: Double = 0.55, danger: Bool = false) {
-        music.update(tension: tension, enabled: enabled, level: level, danger: danger)
+    func setMusic(tension: Double, enabled: Bool, level: Double = 0.55, danger: Bool = false, style: MusicStyle = .terra) {
+        music.update(tension: tension, enabled: enabled, level: level, danger: danger, style: style)
     }
 
     func playFanfare() {

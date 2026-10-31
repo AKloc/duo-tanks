@@ -31,9 +31,10 @@ struct MusicTests {
         #expect(render(synth, seconds: 4) < 0.0005)
     }
 
-    @Test func theSongRunsMuchLongerThanFourBarsBeforeRepeating() {
+    @Test(arguments: WorldTheme.allCases)
+    func theSongRunsMuchLongerThanFourBarsBeforeRepeating(_ theme: WorldTheme) {
         for tense in [false, true] {
-            let song = (0..<MusicSynth.barsPerSong).map { MusicSynth.chord(forBar: $0, tense: tense) }
+            let song = (0..<MusicSynth.barsPerSong).map { MusicSynth.chord(forBar: $0, tense: tense, style: .for(theme)) }
             #expect(Array(song[0..<4]) != Array(song[4..<8]))
             #expect(Array(song[0..<8]) != Array(song[8..<16]))
             #expect(Array(song[0..<16]) != Array(song[16..<32]))
@@ -65,5 +66,27 @@ struct MusicTests {
         tense.update(tension: 1, enabled: true)
         // Tension eases in, so give it time to arrive.
         #expect(render(tense, seconds: 6) > render(calm, seconds: 6))
+    }
+
+    @Test(arguments: WorldTheme.allCases)
+    func everyWorldHasMusic(_ theme: WorldTheme) {
+        let style = MusicStyle.for(theme)
+        #expect(style.sections.count == 5 && style.sections.allSatisfy { $0.count == 4 })
+        #expect(style.danger.count == 4)
+        #expect(style.scale.count == 10 && style.scale == style.scale.sorted())
+        let synth = MusicSynth(sampleRate: 44_100)
+        synth.update(tension: 0.6, enabled: true, style: style)
+        #expect(render(synth, seconds: 3) > 0.005)
+    }
+
+    @Test func worldsSoundDifferent() {
+        let styles = WorldTheme.allCases.map(MusicStyle.for)
+        for (i, a) in styles.enumerated() {
+            for b in styles.dropFirst(i + 1) {
+                #expect(a.sections != b.sections || a.lead != b.lead)
+            }
+        }
+        #expect(MusicStyle.for(.aerie).lead == .bell)
+        #expect(MusicStyle.for(.moon).lead == .theremin)
     }
 }

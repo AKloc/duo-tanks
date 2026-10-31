@@ -673,7 +673,7 @@ final class Game {
             if chargePower != nil { tension += 0.1 }
         }
         let isDanger = (phase == .aiming || phase == .firing) && tanks.contains { $0.isAlive && $0.healthFraction * 100 <= Game.dangerHealth }
-        sound.setMusic(tension: tension, enabled: settings.musicEnabled, level: level, danger: isDanger)
+        sound.setMusic(tension: tension, enabled: settings.musicEnabled, level: level, danger: isDanger, style: .for(theme))
     }
 
     private func buzz(_ intensity: Double) {

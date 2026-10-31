@@ -7,20 +7,12 @@ protocol AudioRenderer: Sendable {
 }
 
 /// A small generative score. `tension` (0...1) raises the tempo, darkens the chords
-/// and layers in drums, bass syncopation, an arpeggio and hi-hats.
+/// and layers in drums, bass syncopation, an arpeggio and hi-hats. Each world brings its own `MusicStyle`.
 final class MusicSynth: AudioRenderer {
     struct Chord: Equatable {
         let bass: Int
         let tones: [Int]
     }
-
-    private static let am = Chord(bass: 45, tones: [57, 60, 64]), f = Chord(bass: 41, tones: [53, 57, 60])
-    private static let c = Chord(bass: 48, tones: [55, 60, 64]), g = Chord(bass: 43, tones: [55, 59, 62])
-    private static let dm = Chord(bass: 38, tones: [50, 53, 57]), e = Chord(bass: 40, tones: [56, 59, 64])
-    private static let em = Chord(bass: 40, tones: [55, 59, 64])
-    /// The half-step lurch from A minor up to B♭ is what makes the danger loop sound like trouble.
-    private static let bb = Chord(bass: 46, tones: [58, 62, 65])
-    private static let danger = [am, bb, am, e]
 
     /// The victory fanfare, in C major: one chord per bar, then a held final chord.
     private static let fanfareChords = [Chord(bass: 48, tones: [60, 64, 67]), Chord(bass: 41, tones: [57, 60, 65]),
@@ -33,18 +25,9 @@ final class MusicSynth: AudioRenderer {
     ]
     static let fanfareBars = 6
 
-    /// Four-bar sections, arranged into 32-bar songs so nothing repeats too soon.
-    private static let sections: [[Chord]] = [
-        [am, f, c, g],
-        [f, g, em, am],
-        [dm, am, e, am],
-        [c, g, am, f],
-        [am, dm, f, e],
-    ]
+    /// Which of the style's four-bar sections play, arranged into 32-bar songs so nothing repeats too soon.
     private static let calmSong = [0, 1, 0, 3, 1, 3, 0, 2]
     private static let tenseSong = [0, 4, 2, 4, 1, 2, 4, 2]
-    /// A minor pentatonic across two octaves, for the lead.
-    private static let scale = [57, 60, 62, 64, 67, 69, 72, 74, 76, 79]
     /// Rhythms for the lead, one per bar; `true` starts a note on that sixteenth.
     private static let rhythms: [[Bool]] = [
         [true, false, false, false, true, false, false, false, true, false, true, false, false, false, false, false],
@@ -56,13 +39,14 @@ final class MusicSynth: AudioRenderer {
     private static let stepsPerBar = 16
     static let barsPerSong = 32
 
-    static func chord(forBar bar: Int, tense: Bool) -> Chord {
+    static func chord(forBar bar: Int, tense: Bool, style: MusicStyle = .terra) -> Chord {
         let song = tense ? tenseSong : calmSong
-        let section = sections[song[(bar / 4) % song.count]]
+        let section = style.sections[song[(bar / 4) % song.count]]
         return section[bar % 4]
     }
 
     private struct State {
+        var style = MusicStyle.terra
         var tension = 0.2
         var targetTension = 0.2
         var gain = 0.0
@@ -78,7 +62,7 @@ final class MusicSynth: AudioRenderer {
         var kickPhase = 0.0, kickEnvelope = 0.0
         var hatEnvelope = 0.0, lastNoise = 0.0, noiseSeed: UInt32 = 22_222
         var arpPhase = 0.0, arpFrequency = 440.0, arpEnvelope = 0.0, arpIndex = 0
-        var leadPhase = 0.0, leadFrequency = 440.0, leadTarget = 440.0, leadEnvelope = 0.0, leadNote = 5
+        var leadPhase = 0.0, leadModPhase = 0.0, leadFrequency = 440.0, leadTarget = 440.0, leadEnvelope = 0.0, leadNote = 5
         var barRhythm = 0
         var melodySeed: UInt32 = 7
         /// Danger fades in and out smoothly, but its chords and drums only switch at a bar line.
@@ -99,8 +83,13 @@ final class MusicSynth: AudioRenderer {
         self.sampleRate = sampleRate
     }
 
-    func update(tension: Double, enabled: Bool, level: Double = 0.55, danger: Bool = false) {
+    func update(tension: Double, enabled: Bool, level: Double = 0.55, danger: Bool = false, style: MusicStyle = .terra) {
         state.withLock {
+            if $0.style != style {
+                $0.style = style
+                $0.bar = 0
+                $0.step = 0
+            }
             $0.targetTension = min(max(tension, 0), 1)
             $0.targetGain = enabled ? level : 0
             $0.wantsDanger = danger
@@ -129,7 +118,7 @@ final class MusicSynth: AudioRenderer {
                 s.untilNextStep -= 1
                 if s.untilNextStep <= 0 {
                     trigger(&s)
-                    let bpm = s.fanfareBar != nil ? 112 : 80 + 50 * s.tension + 22 * s.danger
+                    let bpm = s.fanfareBar != nil ? 112 : s.style.baseBPM + s.style.bpmRange * s.tension + 22 * s.danger
                     s.untilNextStep += sampleRate * 60 / bpm / 4
                 }
 
@@ -137,13 +126,15 @@ final class MusicSynth: AudioRenderer {
                 s.lfo += dt * 0.25
                 var pad = 0.0
                 for i in s.padPhases.indices {
-                    s.padPhases[i] = (s.padPhases[i] + s.padFrequencies[i] * dt).truncatingRemainder(dividingBy: 1)
+                    let drift = 1 + s.style.padWobble * sin(2 * .pi * s.lfo * (1.1 + 0.37 * Double(i)))
+                    s.padPhases[i] = (s.padPhases[i] + s.padFrequencies[i] * drift * dt).truncatingRemainder(dividingBy: 1)
                     pad += sin(2 * .pi * s.padPhases[i]) * (i < 3 ? 1 : 0.5)
+                    if s.style.padShimmer, i < 3 { pad += sin(4 * .pi * s.padPhases[i]) * 0.3 }
                 }
                 pad *= 0.035 * (1 - 0.35 * s.tension) * (0.85 + 0.15 * sin(2 * .pi * s.lfo))
 
                 s.bassPhase = (s.bassPhase + s.bassFrequency * dt).truncatingRemainder(dividingBy: 1)
-                let bass = tanh(2.2 * sin(2 * .pi * s.bassPhase)) * s.bassEnvelope * 0.16
+                let bass = tanh(s.style.bassDrive * sin(2 * .pi * s.bassPhase)) * s.bassEnvelope * (s.style.bassDrive > 3 ? 0.13 : 0.16)
                 s.bassEnvelope *= 0.99985
 
                 let kickFrequency = 45 + 110 * s.kickEnvelope * s.kickEnvelope
@@ -161,10 +152,12 @@ final class MusicSynth: AudioRenderer {
                 let arp = sin(2 * .pi * s.arpPhase) * s.arpEnvelope * 0.07
                 s.arpEnvelope *= 0.99965
 
-                s.leadFrequency += (s.leadTarget - s.leadFrequency) * 0.002
-                let vibrato = 1 + 0.004 * sin(2 * .pi * s.lfo * 22)
+                let voice = s.fanfareBar != nil ? MusicStyle.Lead.flute : s.style.lead
+                s.leadFrequency += (s.leadTarget - s.leadFrequency) * (voice == .theremin ? 0.00035 : 0.002)
+                let vibrato = 1 + (voice == .theremin ? 0.012 : 0.004) * sin(2 * .pi * s.lfo * 22)
                 s.leadPhase = (s.leadPhase + s.leadFrequency * vibrato * dt).truncatingRemainder(dividingBy: 1)
-                let leadWave = sin(2 * .pi * s.leadPhase) + 0.25 * sin(6 * .pi * s.leadPhase)
+                s.leadModPhase = (s.leadModPhase + s.leadFrequency * 3.5 * dt).truncatingRemainder(dividingBy: 1)
+                let leadWave = leadWave(voice, phase: s.leadPhase, modPhase: s.leadModPhase, envelope: s.leadEnvelope)
                 let lead = leadWave * s.leadEnvelope * 0.055 * (s.fanfareBar != nil ? 1.3 : (1 - 0.4 * s.tension) * (1 - 0.6 * s.danger))
                 s.leadEnvelope *= s.leadDecay
 
@@ -194,9 +187,16 @@ final class MusicSynth: AudioRenderer {
 
         let tense = s.tension > 0.65
         let beat = s.step
-        let chord = s.isDanger ? Self.danger[s.bar % 4] : Self.chord(forBar: s.bar, tense: tense)
+        let style = s.style
+        let chord = s.isDanger ? style.danger[s.bar % 4] : Self.chord(forBar: s.bar, tense: tense, style: style)
         let isSectionEnd = s.bar % 4 == 3
-        s.leadDecay = 0.99993
+        s.leadDecay = switch style.lead {
+        case .flute: 0.99993
+        case .bell: 0.99986
+        case .theremin: 0.99997
+        case .pluck: 0.9997
+        case .reed: 0.99992
+        }
 
         if s.isDanger {
             // A relentless eighth-note bass, kick on every beat, snare on two and four, sixteenth hats.
@@ -215,7 +215,7 @@ final class MusicSynth: AudioRenderer {
         if beat == 0 {
             for (i, tone) in chord.tones.enumerated() {
                 s.padFrequencies[i] = frequency(tone)
-                s.padFrequencies[i + 3] = frequency(tone) * 1.004
+                s.padFrequencies[i + 3] = frequency(tone) * style.padDetune
             }
             // A new lead rhythm each bar, drawn from a seed that changes every time the song comes around.
             s.melodySeed = UInt32(truncatingIfNeeded: s.bar &* 2_654_435_761 &+ s.songsPlayed &* 40_503 &+ 1)
@@ -229,7 +229,7 @@ final class MusicSynth: AudioRenderer {
         }
 
         let fill = isSectionEnd && beat >= 12 && s.tension > 0.5
-        if s.tension > 0.35, beat % (s.tension > 0.6 ? 4 : 8) == 0 || fill {
+        if s.tension > style.drumsFrom, beat % (s.tension > 0.6 ? 4 : 8) == 0 || fill {
             s.kickEnvelope = fill ? 0.8 : 1
             s.kickPhase = 0
         }
@@ -237,8 +237,8 @@ final class MusicSynth: AudioRenderer {
             s.hatEnvelope = 1
         }
 
-        if s.tension > 0.45, beat % (s.tension > 0.8 ? 1 : 2) == 0 {
-            let tones = chord.tones.map { $0 + 12 }
+        if s.tension > style.arpFrom, beat % (s.tension > 0.8 ? 1 : 2) == 0 {
+            let tones = chord.tones.map { $0 + style.arpOctave }
             s.arpIndex += 1
             // Up, down, or up-and-back depending on the section.
             let pattern = (s.bar / 4) % 3
@@ -255,12 +255,14 @@ final class MusicSynth: AudioRenderer {
         // Lead: a wandering pentatonic line that leans toward the chord, quieter as the drums take over.
         if Self.rhythms[s.barRhythm][beat], s.bar % 8 < 6 || s.tension < 0.5 {
             let leap = Int(next(&s.melodySeed) % 5) - 2
-            var note = min(max(s.leadNote + leap, 0), Self.scale.count - 1)
-            if beat == 0, let nearest = Self.scale.indices.min(by: { abs(Self.scale[$0] - chord.tones[0] - 12) < abs(Self.scale[$1] - chord.tones[0] - 12) }) {
+            let scale = style.scale
+            var note = min(max(s.leadNote + leap, 0), scale.count - 1)
+            if beat == 0, let nearest = scale.indices.min(by: { abs(scale[$0] - chord.tones[0] - 12) < abs(scale[$1] - chord.tones[0] - 12) }) {
                 note = nearest
             }
             s.leadNote = note
-            s.leadTarget = frequency(Self.scale[note])
+            s.leadTarget = frequency(scale[note])
+            if style.lead == .pluck { s.leadFrequency = s.leadTarget }
             s.leadEnvelope = 1
         }
 
@@ -307,6 +309,23 @@ final class MusicSynth: AudioRenderer {
             s.step = 0
             s.fanfareBar = bar + 1 < Self.fanfareBars ? bar + 1 : nil
             if s.fanfareBar == nil { s.bar = 0 }
+        }
+    }
+
+    private func leadWave(_ voice: MusicStyle.Lead, phase: Double, modPhase: Double, envelope: Double) -> Double {
+        switch voice {
+        case .flute:
+            return sin(2 * .pi * phase) + 0.25 * sin(6 * .pi * phase)
+        case .bell:
+            // The modulator fades with the note, so each chime starts bright and mellows.
+            return sin(2 * .pi * phase + 2.2 * min(envelope, 1) * sin(2 * .pi * modPhase))
+        case .theremin:
+            return sin(2 * .pi * phase) * 1.15
+        case .pluck:
+            return sin(2 * .pi * phase) + 0.45 * sin(4 * .pi * phase) + 0.2 * sin(6 * .pi * phase)
+        case .reed:
+            let raw = sin(2 * .pi * phase) + 0.5 * sin(4 * .pi * phase) + 0.35 * sin(6 * .pi * phase) + 0.2 * sin(8 * .pi * phase)
+            return tanh(1.6 * raw) * 0.85
         }
     }
 

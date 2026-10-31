@@ -58,13 +58,16 @@ struct CampaignTests {
     }
 
     /// Searches angles and powers for a shot that wins, using the real simulation.
-    private func findsWinningShot(missionID: String, weapon: Weapon, angles: StrideThrough<Double>, powers: StrideThrough<Double>) -> Bool {
+    private func findsWinningShot(missionID: String, weapon: Weapon, angles: StrideThrough<Double>, powers: StrideThrough<Double>,
+                                  shots: Int = 1) -> Bool {
         let game = Game(mission: Mission.with(id: missionID)!, difficulty: .hard, settings: settings())
         for angle in angles {
             for power in powers {
                 game.restartMission()
-                game.fireForTesting(weapon: weapon, angle: angle, power: power)
-                game.runUntilSettled()
+                for _ in 0..<shots where game.phase == .aiming {
+                    game.fireForTesting(weapon: weapon, angle: angle, power: power)
+                    game.runUntilSettled()
+                }
                 if case .missionOver(won: true, _) = game.phase { return true }
             }
         }
@@ -75,8 +78,21 @@ struct CampaignTests {
         #expect(findsWinningShot(missionID: "terra-4", weapon: .roller, angles: stride(from: 25, through: 75, by: 5), powers: stride(from: 25, through: 80, by: 5)))
     }
 
-    @Test func dropZoneCanBeSolvedWithAMissile() {
-        #expect(findsWinningShot(missionID: "aerie-3", weapon: .missile, angles: stride(from: 15, through: 70, by: 5), powers: stride(from: 20, through: 70, by: 4)))
+    @Test func dropZoneTakesBothMissilesInTheSameSpot() {
+        let angles = stride(from: 15.0, through: 85, by: 2.5), powers = stride(from: 20.0, through: 90, by: 2)
+        #expect(!findsWinningShot(missionID: "aerie-3", weapon: .missile, angles: angles, powers: powers), "one missile isn't enough")
+        #expect(findsWinningShot(missionID: "aerie-3", weapon: .missile, angles: angles, powers: powers, shots: 2))
+    }
+
+    @Test func drifterIslandsMoveRelativeToEachOther() {
+        let game = Game(mission: Mission.with(id: "aerie-4")!, difficulty: .normal, settings: settings())
+        let player = game.terrain.islands[0], enemy = game.terrain.islands[2]
+        let gaps = stride(from: 0.0, through: 8, by: 1.6).map { step in
+            enemy.position(atPhase: enemy.phase + step) - player.position(atPhase: player.phase + step)
+        }
+        for (a, b) in zip(gaps, gaps.dropFirst()) {
+            #expect(abs(a.x - b.x) + abs(a.y - b.y) > 25, "the shot changes between the player's turns")
+        }
     }
 
     @Test func firestarterCanBeSolvedWithNapalm() {
@@ -159,13 +175,14 @@ struct TourProgressTests {
         #expect(progress.isUnlocked(.cinder))
     }
 
-    @Test func threeFailuresLetYouSkipAhead() {
+    @Test func losingNeverUnlocksTheNextMission() {
         let progress = TourProgress.shared
         progress.reset()
         defer { progress.reset() }
         let terra = Chapter.terra.missions
-        for _ in 0..<3 { progress.record(terra[0], stars: 0) }
-        #expect(progress.isUnlocked(terra[1]))
+        for _ in 0..<5 { progress.record(terra[0], stars: 0) }
+        #expect(!progress.isUnlocked(terra[1]))
+        #expect(progress.nextMission == terra[0])
     }
 
     @Test func bestStarsAreKept() {

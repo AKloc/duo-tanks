@@ -2,3 +2,4 @@ DuoTanks.xcodeproj/
 build/
 .DS_Store
 xcuserdata/
+build-device/
